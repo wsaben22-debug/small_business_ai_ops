@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <title>客服案件列表</title>
+</head>
+
+<body>
+    <table border="1">
+    <tr>
+        <th>訂單編號</th>
+        <th>客戶姓名</th>
+        <th>問題分類</th>
+        <th>處理狀態</th>
+        <th>問題內容</th>
+    </tr>
+
+    {% for ticket in tickets %}
+    <tr>
+        <td>{{ ticket.order.order_number }}</td>
+        <td>{{ ticket.customer.name }}</td>
+        <td>{{ ticket.get_category_display }}</td>
+        <td>{{ ticket.get_status_display }}</td>
+        <td>{{ ticket.message }}</td>
+    </tr>
+    {% endfor %}
+</table>
+</body>
+
+</html>

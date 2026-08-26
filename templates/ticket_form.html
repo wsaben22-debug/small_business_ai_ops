@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <title>新增客服案件</title>
+</head>
+
+<body>
+
+    <h1>新增客服案件</h1>
+
+    <form method="post">
+    {% csrf_token %}
+
+    {{ form.as_p }}
+
+    <button type="submit">新增客服案件</button>
+</form>
+
+</body>
+
+</html>
