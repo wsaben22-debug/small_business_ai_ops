@@ -8,16 +8,16 @@
 
 <body>
 
-    <h1>新增客服案件</h1>
+    <h1>{{ title }}</h1>
 
     <form method="post">
     {% csrf_token %}
 
     {{ form.as_p }}
 
-    <button type="submit">新增客服案件</button>
+    <button type="submit">{{ button_text }}</button>
 </form>
-
+<a href="{% url 'ticket_list' %}">返回客服案件列表</a>
 </body>
 
 </html>

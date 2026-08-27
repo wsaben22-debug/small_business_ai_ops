@@ -7,6 +7,165 @@
 </head>
 
 <body>
+    <h1>客服案件列表</h1>
+    <a href="{% url 'ticket_create' %}">新增客服案件</a>
+
+    {% if not selected_status %}
+
+    <strong>全部</strong>
+
+{% else %}
+
+    {% if selected_category %}
+        <a href="{% url 'ticket_list' %}?category={{ selected_category }}">全部</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}">全部</a>
+    {% endif %}
+
+{% endif %}
+    
+    {% if selected_status == 'open' %}
+      <strong>待處理</strong>
+    {% else %}
+
+      {% if selected_category %}
+        <a href="{% url 'ticket_list' %}?status=open&category={{ selected_category }}">待處理</a>
+      {% else %}
+        <a href="{% url 'ticket_list' %}?status=open">待處理</a>
+      {% endif %}
+    {% endif %}
+
+
+    {% if selected_status == 'in_progress' %}
+      <strong>處理中</strong>
+    {% else %}
+
+      {% if selected_category %}
+        <a href="{% url 'ticket_list' %}?status=in_progress&category={{ selected_category }}">處理中</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}?status=in_progress">處理中</a>
+    {% endif %}
+
+    {% endif %}
+
+
+    {% if selected_status == 'resolved' %}
+
+    <strong>已解決</strong>
+
+    {% else %}
+
+    {% if selected_category %}
+        <a href="{% url 'ticket_list' %}?status=resolved&category={{ selected_category }}">已解決</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}?status=resolved">已解決</a>
+    {% endif %}
+
+    {% endif %}
+
+    {% if selected_status == 'closed' %}
+    <strong>已關閉</strong>
+    {% else %}
+
+    {% if selected_category %}
+        <a href="{% url 'ticket_list' %}?status=closed&category={{ selected_category }}">已關閉</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}?status=closed">已關閉</a>
+    {% endif %}
+
+    {% endif %}
+
+    <p>
+  分類:
+
+  {% if not selected_category %}
+
+    <strong>全部分類</strong>
+
+{% else %}
+
+    {% if selected_status %}
+        <a href="{% url 'ticket_list' %}?status={{ selected_status }}">全部分類</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}">全部分類</a>
+    {% endif %}
+
+{% endif %}
+
+
+  {% if selected_category == 'delivery' %}
+
+    <strong>配送問題</strong>
+
+  {% else %}
+
+    {% if selected_status %}
+        <a href="{% url 'ticket_list' %}?status={{ selected_status }}&category=delivery">配送問題</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}?category=delivery">配送問題</a>
+    {% endif %}
+
+  {% endif %}
+
+  {% if selected_category == 'damaged' %}
+
+      <strong>商品損壞</strong>
+
+  {% else %}
+
+    {% if selected_status %}
+        <a href="{% url 'ticket_list' %}?status={{ selected_status }}&category=damaged">商品損壞</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}?category=damaged">商品損壞</a>
+    {% endif %}
+
+  {% endif %}
+
+
+  {% if selected_category == 'missing' %}
+
+    <strong>商品缺失</strong>
+
+  {% else %}
+
+    {% if selected_status %}
+        <a href="{% url 'ticket_list' %}?status={{ selected_status }}&category=missing">商品缺失</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}?category=missing">商品缺失</a>
+    {% endif %}
+
+    {% endif %}
+
+  {% if selected_category == 'refund' %}
+
+    <strong>退貨問題</strong>
+
+  {% else %}
+
+    {% if selected_status %}
+        <a href="{% url 'ticket_list' %}?status={{ selected_status }}&category=refund">退貨問題</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}?category=refund">退貨問題</a>
+    {% endif %}
+
+  {% endif %}
+
+  {% if selected_category == 'other' %}
+
+    <strong>其他問題</strong>
+
+  {% else %}
+
+    {% if selected_status %}
+        <a href="{% url 'ticket_list' %}?status={{ selected_status }}&category=other">其他問題</a>
+    {% else %}
+        <a href="{% url 'ticket_list' %}?category=other">其他問題</a>
+    {% endif %}
+
+  {% endif %}
+
+</p>
+
     <table border="1">
     <tr>
         <th>訂單編號</th>
@@ -14,6 +173,7 @@
         <th>問題分類</th>
         <th>處理狀態</th>
         <th>問題內容</th>
+        <th>操作</th>
     </tr>
 
     {% for ticket in tickets %}
@@ -23,6 +183,14 @@
         <td>{{ ticket.get_category_display }}</td>
         <td>{{ ticket.get_status_display }}</td>
         <td>{{ ticket.message }}</td>
+        <td>
+          <a href="{% url 'ticket_edit' ticket.id %}">修改</a> 
+          <a href="{% url 'ticket_delete' ticket.id%}">刪除</a>
+        </td>
+    </tr>
+    {% empty %}
+    <tr>
+    <td colspan="6">目前沒有符合條件的客服案件</td>
     </tr>
     {% endfor %}
 </table>

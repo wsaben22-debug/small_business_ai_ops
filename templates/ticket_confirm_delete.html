@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>刪除確認</title>
+</head>
+<body>
+  <h1>確認刪除客服案件</h1>
+  <p>您確定要刪除這個客服案件嗎？此操作無法撤銷。</p>
+  <p>訂單: {{ ticket.order.order_number }}</p>
+  <p>分類: {{ ticket.get_category_display }}</p>
+  <p>內容: {{ ticket.message }}</p>
+  <form method="post">
+    {% csrf_token %}
+    <button type="submit">確認刪除</button>
+  </form>
+  <a href="{% url 'ticket_list' %}">取消</a>
+</body>
+</html>
