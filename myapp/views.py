@@ -5,6 +5,10 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from .serializers import SupportTicketSerializer
 from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework import generics
+from rest_framework import viewsets
+from rest_framework import permissions
 
 def ticket_list(request):
     status = request.GET.get('status')
@@ -107,3 +111,66 @@ def support_ticket_detail_api(request, ticket_id):
     elif request.method == 'DELETE':
         ticket.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+class SupportTicketListAPIView(APIView):
+    def get(self, request):
+        tickets = SupportTicket.objects.all()
+        serializer = SupportTicketSerializer(tickets, many=True)
+        return Response(serializer.data)
+    
+    def post(self, request):
+        serializer = SupportTicketSerializer(data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class SupportTicketDetailAPIView(APIView):
+    def get(self, request, ticket_id):
+        ticket = get_object_or_404(SupportTicket, id=ticket_id)
+        serializer = SupportTicketSerializer(ticket)
+        return Response(serializer.data)
+    
+    def put(self, request, ticket_id):
+        ticket = get_object_or_404(SupportTicket, id=ticket_id)
+        serializer = SupportTicketSerializer(ticket, data=request.data)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, ticket_id):
+        ticket = get_object_or_404(SupportTicket, id=ticket_id)
+        serializer = SupportTicketSerializer(ticket, data=request.data, partial=True)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+
+        else:
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, ticket_id):
+        ticket = get_object_or_404(SupportTicket, id=ticket_id)
+        ticket.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+class SupportTicketListGenericAPIView(generics.ListCreateAPIView):
+    queryset = SupportTicket.objects.all()
+    serializer_class = SupportTicketSerializer
+
+class SupportTicketDetailGenericAPIView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = SupportTicket.objects.all()
+    serializer_class = SupportTicketSerializer
+    lookup_url_kwarg = 'ticket_id'
+
+class SupportTicketViewSet(viewsets.ModelViewSet):
+    queryset = SupportTicket.objects.all()
+    serializer_class = SupportTicketSerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
