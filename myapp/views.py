@@ -9,6 +9,10 @@ from rest_framework.views import APIView
 from rest_framework import generics
 from rest_framework import viewsets
 from rest_framework import permissions
+from .permissions import IsAuthenticatedWriteAdminDelete
+from rest_framework.authentication import TokenAuthentication, SessionAuthentication, BasicAuthentication
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import OrderingFilter
 
 def ticket_list(request):
     status = request.GET.get('status')
@@ -173,4 +177,16 @@ class SupportTicketDetailGenericAPIView(generics.RetrieveUpdateDestroyAPIView):
 class SupportTicketViewSet(viewsets.ModelViewSet):
     queryset = SupportTicket.objects.all()
     serializer_class = SupportTicketSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['status', 'category']
+    ordering_fields = ['created_at', 'id']
+    ordering = ['id']
+
+    authentication_classes = [
+        TokenAuthentication,
+        SessionAuthentication,
+        BasicAuthentication,
+    ]
+
+    permission_classes = [IsAuthenticatedWriteAdminDelete]
