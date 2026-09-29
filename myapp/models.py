@@ -178,3 +178,40 @@ class TicketTriageDecision(models.Model):
             )
 
         super().save(*args, **kwargs)
+
+class TriageExecutionRecord(models.Model):
+
+    EXECUTION_STATUS_CHOICES = [
+        ("success", "Success"),
+        ("skipped", "Skipped"),
+        ("failed", "Failed"),
+    ]
+
+    decision = models.ForeignKey(
+        TicketTriageDecision,
+        on_delete=models.PROTECT,
+        related_name="execution_records",
+    )
+
+    action_code = models.CharField(
+        max_length=50,
+    )
+
+    execution_status = models.CharField(
+        max_length=20,
+        choices=EXECUTION_STATUS_CHOICES,
+    )
+
+    reason = models.TextField()
+
+    ticket_status_before = models.CharField(
+        max_length=20,
+    )
+
+    ticket_status_after = models.CharField(
+        max_length=20,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )

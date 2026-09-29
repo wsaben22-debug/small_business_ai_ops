@@ -13,6 +13,12 @@ from .permissions import IsAuthenticatedWriteAdminDelete
 from rest_framework.authentication import TokenAuthentication, SessionAuthentication, BasicAuthentication
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import OrderingFilter
+from .evaluation_service import calculate_triage_metrics
+from .dashboard_service import (
+    get_high_risk_queue,
+    get_recent_execution_history,
+)
+from .triage_service import build_high_risk_support_package
 
 def ticket_list(request):
     status = request.GET.get('status')
@@ -190,3 +196,61 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     ]
 
     permission_classes = [IsAuthenticatedWriteAdminDelete]
+
+def triage_dashboard(request):
+    metrics = calculate_triage_metrics()
+    high_risk_queue = get_high_risk_queue()
+    recent_execution_history = get_recent_execution_history()
+
+    context = {
+        "metrics": metrics,
+        "high_risk_queue": high_risk_queue,
+        "recent_execution_history": recent_execution_history,
+    }
+
+    return render(
+        request,
+        "myapp/triage_dashboard.html",
+        context,
+    )
+
+def high_risk_review(request, ticket_id):
+    ticket = get_object_or_404(
+        SupportTicket,
+        id=ticket_id,
+    )
+
+    latest_decision = (
+        ticket.triage_decisions
+        .order_by("-created_at")
+        .first()
+    )
+
+    if latest_decision is None:
+        context = {
+            "ticket": ticket,
+            "package": None,
+            "error": "This ticket has no triage decision.",
+        }
+
+        return render(
+            request,
+            "myapp/high_risk_review.html",
+            context,
+        )
+
+    package, error = build_high_risk_support_package(
+        latest_decision
+    )
+
+    context = {
+        "ticket": ticket,
+        "package": package,
+        "error": error,
+    }
+
+    return render(
+        request,
+        "myapp/high_risk_review.html",
+        context,
+    )

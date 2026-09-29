@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>High Risk Review</title>
+</head>
+<body>
+
+    <h1>High Risk Ticket Review</h1>
+
+    <p>
+        <a href="{% url 'triage_dashboard' %}">
+            Back to Dashboard
+        </a>
+    </p>
+
+    {% if error %}
+        <p>{{ error }}</p>
+    {% elif package %}
+
+        <h2>Ticket</h2>
+
+        <p>Ticket ID: {{ package.ticket_id }}</p>
+        <p>Category: {{ package.category }}</p>
+        <p>Requested Action: {{ package.requested_action }}</p>
+        <p>Route: {{ package.route }}</p>
+        <p>Route Reason: {{ package.route_reason }}</p>
+
+
+        <h2>Priority</h2>
+
+        <p>
+            Level:
+            {{ package.priority.level }}
+        </p>
+
+        <p>
+            Score:
+            {{ package.priority.score }}
+        </p>
+
+
+        <h2>Assessment</h2>
+
+        <h3>Severity</h3>
+        <p>
+            {{ package.severity.level }}
+            /
+            {{ package.severity.score }}
+        </p>
+        <p>{{ package.severity.reason }}</p>
+
+        <h3>Impact</h3>
+        <p>
+            {{ package.impact.level }}
+            /
+            {{ package.impact.score }}
+        </p>
+        <p>{{ package.impact.reason }}</p>
+
+        <h3>Urgency</h3>
+        <p>
+            {{ package.urgency.level }}
+            /
+            {{ package.urgency.score }}
+        </p>
+        <p>{{ package.urgency.reason }}</p>
+
+
+        <h2>Customer</h2>
+
+        <p>Name: {{ package.customer.name }}</p>
+        <p>Email: {{ package.customer.email }}</p>
+        <p>Phone: {{ package.customer.phone }}</p>
+
+
+        <h2>Order</h2>
+
+        <p>Order Number: {{ package.order.order_number }}</p>
+        <p>Status: {{ package.order.status }}</p>
+        <p>Order Total: {{ package.order_total }}</p>
+        <p>Shipping Address: {{ package.order.shipping_address }}</p>
+
+
+        <h2>Decision Support</h2>
+
+        <p>
+            Recommended Action:
+            {{ package.decision_support.recommended_action }}
+        </p>
+
+        <p>
+            Recommendation Reason:
+            {{ package.decision_support.recommendation_reason }}
+        </p>
+
+        <h3>Available Options</h3>
+
+        <ul>
+            {% for option in package.decision_support.options %}
+                <li>{{ option }}</li>
+            {% endfor %}
+        </ul>
+
+
+        <h2>Ticket History</h2>
+
+        <p>
+            Prior Ticket Count:
+            {{ package.ticket_history.prior_ticket_count }}
+        </p>
+
+        <p>
+            Same Category Count:
+            {{ package.ticket_history.same_category_ticket_count }}
+        </p>
+
+        {% if package.ticket_history.recent_tickets %}
+            <table border="1" cellpadding="8">
+                <tr>
+                    <th>Ticket ID</th>
+                    <th>Category</th>
+                    <th>Requested Action</th>
+                    <th>Status</th>
+                </tr>
+
+                {% for history_ticket in package.ticket_history.recent_tickets %}
+                <tr>
+                    <td>{{ history_ticket.ticket_id }}</td>
+                    <td>{{ history_ticket.category }}</td>
+                    <td>{{ history_ticket.requested_action }}</td>
+                    <td>{{ history_ticket.status }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+        {% else %}
+            <p>No prior tickets.</p>
+        {% endif %}
+
+    {% endif %}
+
+</body>
+</html>

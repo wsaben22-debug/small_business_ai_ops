@@ -1,5 +1,14 @@
 from django.utils import timezone
-from .models import TicketTriageDecision
+from .models import (
+    Customer,
+    Order,
+    OrderItem,
+    Product,
+    SupportTicket,
+    TicketTriageDecision,
+    TriageExecutionRecord,
+)
+from django.db.models import Q
 
 def assess_severity(category):
 
@@ -310,7 +319,7 @@ def run_triage_workflow(ticket, trigger_type):
  
     return decision, route, reason
 
-def excute_low_risk_action(decision):
+def execute_low_risk_action(decision):
     route, route_reason = evaluate_risk_gate(decision)
 
     if route != "auto_handle":
@@ -318,25 +327,233 @@ def excute_low_risk_action(decision):
             None,
             f"automation blocked by risk gate: {route_reason}",
         )
+    
     if decision.requested_action_snapshot != "info":
         return(
             None,
             f"requested_action={decision.requested_action_snapshot}"
             "is not supported for low-risk automation",
         )
+    
     ticket = decision.ticket
 
     if ticket.status != "open":
-        return(
-            None,
-            f"ticket status={ticket.status} is not supported"
-            "for low-risk automation",
+        
+        action_reason = (
+            f"ticket status={ticket.status} is not supported "
+            "for low-risk automation"
         )
-    
+
+        TriageExecutionRecord.objects.create(
+            decision=decision,
+            action_code="info_triage_prepared",
+            execution_status="skipped",
+            reason=action_reason,
+            ticket_status_before=ticket.status,
+            ticket_status_after=ticket.status,
+        )
+
+        return (
+            None,
+            action_reason,
+        )
+
+    ticket_status_before = ticket.status
     ticket.status = "in_progress"
     ticket.save(update_fields=["status"])
 
-    return(
-        "info_triage_prepared",
-        "low-risk info ticket moved to in_progress",
+    action_code = "info_triage_prepared"
+    action_reason = "low-risk info ticket moved to in_progress"
+
+    TriageExecutionRecord.objects.create(
+        decision=decision,
+        action_code=action_code,
+        execution_status="success",
+        reason=action_reason,
+        ticket_status_before=ticket_status_before,
+        ticket_status_after=ticket.status,
     )
+
+    return(
+        action_code,
+        action_reason,
+    )
+
+def run_triage_execution_workflow(ticket, trigger_type):
+    decision, route, route_reason = run_triage_workflow(
+        ticket,
+        trigger_type,
+    )
+
+    if decision is None:
+        return None, None, None, route_reason
+
+    if route == "human_review":
+        return(
+            decision,
+            route,
+            None,
+            route_reason,
+        )
+
+    action_code, action_reason = execute_low_risk_action(decision)
+
+    return(
+        decision,
+        route,
+        action_code,
+        action_reason,
+    )
+
+def build_high_risk_recommendation(decision):
+    route, route_reason = evaluate_risk_gate(decision)
+
+    if route != "human_review":
+        return None, "decision is not routed to human review"
+
+    options = [
+        "review_requested_action",
+        "request_more_information",
+        "escalate_high_priority_case",
+    ]
+
+    if decision.priority_level == "high":
+        return {
+            "options": options,
+            "recommended_action": "escalate_high_priority_case",
+            "recommendation_reason": (
+                "high priority case requires escalation"
+            ),
+        }, None
+
+    if decision.requires_human:
+        return {
+            "options": options,
+            "recommended_action": "review_requested_action",
+            "recommendation_reason": decision.human_reason,
+        }, None
+
+    return None, "unable to determine human review recommendation"
+
+def build_high_risk_support_package(decision):
+    route, route_reason = evaluate_risk_gate(decision)
+
+    if route != "human_review":
+        return None, "decision is not routed to human review"
+
+    recommendation, recommendation_error = (
+        build_high_risk_recommendation(decision)
+    )
+
+    if recommendation_error is not None:
+        return None, recommendation_error
+
+    ticket = decision.ticket
+
+    ticket = decision.ticket
+    order = ticket.order
+
+    customer = ticket.customer
+
+    if customer is None and order is not None:
+        customer = order.customer
+
+    history_tickets = SupportTicket.objects.none()
+
+    if customer is not None:
+        history_tickets = (
+            SupportTicket.objects
+            .filter(
+                Q(customer=customer) | Q(order__customer=customer),
+                created_at__lte=decision.created_at,
+            )
+            .exclude(id=ticket.id)
+            .distinct()
+        )
+
+    prior_ticket_count = history_tickets.count()
+
+    same_category_ticket_count = history_tickets.filter(
+        category=decision.category_snapshot).count()
+
+    recent_tickets = [
+        {
+            "ticket_id": history_ticket.id,
+            "category": history_ticket.category,
+            "requested_action": history_ticket.requested_action,
+            "status": history_ticket.status,
+        }
+        for history_ticket in history_tickets.order_by("-created_at")[:5]
+    ]
+
+    package = {
+        "ticket_id": ticket.id,
+        "route": route,
+        "route_reason": route_reason,
+
+        "category": decision.category_snapshot,
+        "requested_action": decision.requested_action_snapshot,
+        "order_status": decision.order_status_snapshot,
+        "order_total": decision.order_total_snapshot,
+        "waiting_hours": decision.waiting_hours_snapshot,
+
+        "severity": {
+            "level": decision.severity_level,
+            "score": decision.severity_score,
+            "reason": decision.severity_reason,
+        },
+
+        "impact": {
+            "level": decision.impact_level,
+            "score": decision.impact_score,
+            "reason": decision.impact_reason,
+        },
+
+        "urgency": {
+            "level": decision.urgency_level,
+            "score": decision.urgency_score,
+            "reason": decision.urgency_reason,
+        },
+
+        "priority": {
+            "level": decision.priority_level,
+            "score": decision.priority_score,
+        },
+
+        "human_requirement": {
+            "required": decision.requires_human,
+            "reason": decision.human_reason,
+        },
+
+        "decision_support": {
+            "options": recommendation["options"],
+            "recommended_action": recommendation["recommended_action"],
+            "recommendation_reason": recommendation["recommendation_reason"],
+        },
+
+        "rule_version": decision.rule_version,
+        "decision_created_at": decision.created_at,
+
+        "customer": {
+            "id": customer.id if customer else None,
+            "name": customer.name if customer else None,
+            "email": customer.email if customer else None,
+            "phone": customer.phone if customer else None,
+        },
+
+        "order": {
+            "id": order.id if order else None,
+            "order_number": order.order_number if order else None,
+            "status": order.status if order else None,
+            "shipping_address": order.shipping_address if order else None,
+        },
+
+        "ticket_history": {
+            "prior_ticket_count": prior_ticket_count,
+            "same_category_ticket_count": same_category_ticket_count,
+            "recent_tickets": recent_tickets,
+        },
+    }
+
+    return package, None
+

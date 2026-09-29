@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Triage Dashboard</title>
+</head>
+<body>
+
+    <h1>Support Ticket Triage Dashboard</h1>
+
+    <h2>Total Decisions</h2>
+    <p>{{ metrics.total_decisions }}</p>
+
+    <h2>Human Review</h2>
+    <p>
+        {{ metrics.human_review_count }}
+        ({{ metrics.human_review_rate }}%)
+    </p>
+
+    <h2>Auto Handled</h2>
+    <p>
+        {{ metrics.auto_handled_count }}
+        ({{ metrics.auto_handled_rate }}%)
+    </p>
+
+    <hr>
+
+    <h2>High Risk Queue</h2>
+
+    {% if high_risk_queue %}
+        <table border="1" cellpadding="8">
+            <tr>
+                <th>Ticket ID</th>
+                <th>Category</th>
+                <th>Requested Action</th>
+                <th>Priority</th>
+                <th>Score</th>
+                <th>Reason</th>
+                <th>Review</th>
+            </tr>
+
+            {% for item in high_risk_queue %}
+            <tr>
+                <td>{{ item.ticket_id }}</td>
+                <td>{{ item.category }}</td>
+                <td>{{ item.requested_action }}</td>
+                <td>{{ item.priority_level }}</td>
+                <td>{{ item.priority_score }}</td>
+                <td>{{ item.reason }}</td>
+                <td>
+                    <a href="{% url 'high_risk_review' item.ticket_id %}">
+                        Review
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    {% else %}
+        <p>No high-risk tickets currently require human review.</p>
+    {% endif %}
+
+    <hr>
+
+    <h2>Recent Execution History</h2>
+
+    {% if recent_execution_history %}
+        <table border="1" cellpadding="8">
+            <tr>
+                <th>Ticket ID</th>
+                <th>Action</th>
+                <th>Status</th>
+                <th>Before</th>
+                <th>After</th>
+                <th>Reason</th>
+                <th>Executed At</th>
+            </tr>
+
+            {% for item in recent_execution_history %}
+            <tr>
+                <td>{{ item.ticket_id }}</td>
+                <td>{{ item.action_code }}</td>
+                <td>{{ item.execution_status }}</td>
+                <td>{{ item.status_before }}</td>
+                <td>{{ item.status_after }}</td>
+                <td>{{ item.reason }}</td>
+                <td>{{ item.created_at }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    {% else %}
+        <p>No execution history yet.</p>
+    {% endif %}
+</body>
+</html>

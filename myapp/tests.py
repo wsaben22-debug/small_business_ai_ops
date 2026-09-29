@@ -11,6 +11,7 @@ from .models import (
     Product, 
     SupportTicket, 
     TicketTriageDecision,
+    TriageExecutionRecord,
 )
 from django.test import TestCase
 from .triage_service import (
@@ -25,8 +26,12 @@ from .triage_service import (
     run_triage,
     evaluate_risk_gate,
     run_triage_workflow,
-    excute_low_risk_action
+    execute_low_risk_action,
+    run_triage_execution_workflow,
+    build_high_risk_support_package,
+    build_high_risk_recommendation,
 )
+from .evaluation_service import calculate_triage_metrics
 
 class SupportTicketPermissionTests(APITestCase):
 
@@ -614,10 +619,438 @@ class TicketTriageWorkflowTests(TestCase):
 
         self.assertIsNone(error)
 
-        action_code, reason = excute_low_risk_action(decision)
+        action_code, reason = execute_low_risk_action(decision)
 
         self.ticket.refresh_from_db()
 
         self.assertEqual(action_code, "info_triage_prepared")
         self.assertTrue(reason)
         self.assertEqual(self.ticket.status, "in_progress")
+
+        execution_record = TriageExecutionRecord.objects.get(
+            decision=decision
+        )
+
+        self.assertEqual(
+            execution_record.action_code,
+            "info_triage_prepared",
+        )
+
+        self.assertEqual(
+            execution_record.execution_status,
+            "success",
+        )
+
+        self.assertEqual(
+            execution_record.ticket_status_before,
+            "open",
+        )
+
+        self.assertEqual(
+            execution_record.ticket_status_after,
+            "in_progress",
+        )
+
+        self.assertEqual(
+            execution_record.reason,
+            reason,
+        )
+
+    def test_low_risk_action_blocks_human_review_route(self):
+        decision, error = run_triage(self.ticket, "manual")
+
+        self.assertIsNone(error)
+
+        action_code, reason = execute_low_risk_action(decision)
+
+        self.ticket.refresh_from_db()
+
+        self.assertIsNone(action_code)
+        self.assertTrue(reason)
+        self.assertEqual(self.ticket.status, "open")
+
+    def test_low_risk_action_blocks_unsupported_action(self):
+        decision = SimpleNamespace(
+            requires_human=False,
+            human_reason="no human review required",
+            priority_level="medium",
+            requested_action_snapshot="exchange",
+            ticket=self.ticket,
+        )
+
+        action_code, reason = execute_low_risk_action(decision)
+
+        self.ticket.refresh_from_db()
+
+        self.assertIsNone(action_code)
+        self.assertTrue(reason)
+        self.assertEqual(self.ticket.status, "open")
+
+    def test_low_risk_action_blocks_non_open_ticket(self):
+        self.ticket.requested_action = "info"
+        self.ticket.save(update_fields=["requested_action"])
+
+        decision, error = run_triage(self.ticket, "manual")
+
+        self.assertIsNone(error)
+
+        self.ticket.status = "in_progress"
+        self.ticket.save(update_fields=["status"])
+
+        action_code, reason = execute_low_risk_action(decision)
+
+        self.ticket.refresh_from_db()
+
+        self.assertIsNone(action_code)
+        self.assertTrue(reason)
+        self.assertEqual(self.ticket.status, "in_progress")
+
+        execution_record = TriageExecutionRecord.objects.get(
+        decision=decision
+        )
+
+        self.assertEqual(
+            execution_record.execution_status,
+            "skipped",
+        )
+
+        self.assertEqual(
+            execution_record.ticket_status_before,
+            "in_progress",
+        )
+
+        self.assertEqual(
+            execution_record.ticket_status_after,
+            "in_progress",
+        )
+
+        self.assertEqual(
+            execution_record.reason,
+            reason,
+        )
+
+    def test_executon_workflow_auto_handles_low_risk_info(self):
+        self.ticket.requested_action = "info"
+        self.ticket.save(update_fields=["requested_action"])
+
+        decision, route, action_code, reason = (
+            run_triage_execution_workflow(
+                self.ticket,
+                "manual",
+            )
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "auto_handle")
+        self.assertEqual(action_code, "info_triage_prepared")
+        self.assertTrue(reason)
+        self.assertEqual(self.ticket.status, "in_progress")
+
+    def test_high_risk_support_package_is_created_for_human_review(self):
+        decision, error = run_triage(self.ticket, "manual")
+
+        self.assertIsNone(error)
+
+        package, package_error = build_high_risk_support_package(decision)
+
+        self.assertIsNone(package_error)
+        self.assertIsNotNone(package)
+
+        self.assertEqual(package["ticket_id"], self.ticket.id)
+        self.assertEqual(package["route"], "human_review")
+        self.assertEqual(package["category"], decision.category_snapshot)
+        self.assertEqual(
+            package["requested_action"],
+            decision.requested_action_snapshot,
+        )
+
+        self.assertEqual(
+            package["priority"]["level"],
+            decision.priority_level,
+        )
+
+        self.assertEqual(
+            package["priority"]["score"],
+            decision.priority_score,
+        )
+
+        self.assertIn(
+            "review_requested_action",
+            package["decision_support"]["options"],
+        )
+
+        self.assertEqual(
+            package["decision_support"]["recommended_action"],
+            "review_requested_action",
+        )
+
+        self.assertEqual(
+            package["decision_support"]["recommendation_reason"],
+            decision.human_reason,
+        )
+
+    def test_high_risk_support_package_blocks_auto_handle(self):
+        self.ticket.requested_action = "info"
+        self.ticket.save(update_fields=["requested_action"])
+
+        decision, error = run_triage(self.ticket, "manual")
+
+        self.assertIsNone(error)
+
+        package, package_error = build_high_risk_support_package(decision)
+
+        self.assertIsNone(package)
+        self.assertEqual(
+                package_error,
+                "decision is not routed to human review",
+        )
+
+    def test_high_risk_support_package_includes_customer_and_order(self):
+        decision, error = run_triage(self.ticket, "manual")
+
+        self.assertIsNone(error)
+
+        package, package_error = build_high_risk_support_package(decision)
+
+        self.assertIsNone(package_error)
+        self.assertIsNotNone(package)
+
+        self.assertEqual(
+            package["customer"]["id"],
+            self.customer.id,
+        )
+        self.assertEqual(
+            package["customer"]["name"],
+            self.customer.name,
+        )
+        self.assertEqual(
+            package["customer"]["email"],
+            self.customer.email,
+        )
+        self.assertEqual(
+            package["customer"]["phone"],
+            self.customer.phone,
+        )
+
+        self.assertEqual(
+            package["order"]["id"],
+            self.order.id,
+        )
+        self.assertEqual(
+            package["order"]["order_number"],
+            self.order.order_number,
+        )
+        self.assertEqual(
+            package["order"]["status"],
+            self.order.status,
+        )
+        self.assertEqual(
+            package["order"]["shipping_address"],
+            self.order.shipping_address,
+        )
+
+    def test_high_risk_support_package_falls_back_to_order_customer(self):
+        self.ticket.customer = None
+        self.ticket.save(update_fields=["customer"])
+
+        decision, error = run_triage(self.ticket, "manual")
+
+        self.assertIsNone(error)
+
+        package, package_error = build_high_risk_support_package(decision)
+
+        self.assertIsNone(package_error)
+        self.assertIsNotNone(package)
+
+        self.assertEqual(
+            package["customer"]["id"],
+            self.order.customer.id,
+        )
+        self.assertEqual(
+            package["customer"]["name"],
+            self.order.customer.name,
+        )
+        self.assertEqual(
+            package["customer"]["email"],
+            self.order.customer.email,
+        )
+
+    def test_high_risk_support_package_includes_ticket_history(self):
+        previous_ticket_1 = SupportTicket.objects.create(
+            customer=self.customer,
+            order=self.order,
+            category="damaged",
+            requested_action="exchange",
+            message="previous damaged ticket",
+            status="closed",
+        )
+
+        previous_ticket_2 = SupportTicket.objects.create(
+            customer=self.customer,
+            order=self.order,
+            category="delivery",
+            requested_action="info",
+            message="previous delivery ticket",
+            status="closed",
+        )
+
+        decision, error = run_triage(self.ticket, "manual")
+
+        self.assertIsNone(error)
+
+        package, package_error = build_high_risk_support_package(decision)
+
+        self.assertIsNone(package_error)
+        self.assertIsNotNone(package)
+
+        history = package["ticket_history"]
+
+        self.assertEqual(
+            history["prior_ticket_count"],
+            2,
+        )
+
+        self.assertEqual(
+            history["same_category_ticket_count"],
+            1,
+        )
+
+        recent_ticket_ids = [
+            ticket["ticket_id"]
+            for ticket in history["recent_tickets"]
+        ]
+
+        self.assertIn(
+            previous_ticket_1.id,
+            recent_ticket_ids,
+        )
+        self.assertIn(
+            previous_ticket_2.id,
+            recent_ticket_ids,
+        )
+
+        self.assertNotIn(
+            self.ticket.id,
+            recent_ticket_ids,
+        )
+
+    def test_high_risk_support_package_limits_recent_tickets_to_five(self):
+        for i in range(6):
+            SupportTicket.objects.create(
+                customer=self.customer,
+                order=self.order,
+                category="delivery",
+                requested_action="info",
+                message=f"history ticket {i}",
+                status="closed",
+            )
+
+        decision, error = run_triage(self.ticket, "manual")
+
+        self.assertIsNone(error)
+
+        package, package_error = build_high_risk_support_package(decision)
+
+        self.assertIsNone(package_error)
+        self.assertIsNotNone(package)
+
+        history = package["ticket_history"]
+
+        self.assertEqual(
+            history["prior_ticket_count"],
+            6,
+        )
+
+        self.assertEqual(
+            len(history["recent_tickets"]),
+            5,
+        )
+
+    def test_high_priority_recommends_escalation(self):
+        decision = SimpleNamespace(
+            requires_human=False,
+            human_reason="no human review required",
+            priority_level="high",
+        )
+
+        recommendation, error = build_high_risk_recommendation(decision)
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(recommendation)
+
+        self.assertEqual(
+            recommendation["recommended_action"],
+            "escalate_high_priority_case",
+        )
+
+        self.assertTrue(
+            recommendation["recommendation_reason"]
+        )
+
+    def test_calculate_triage_metrics(self):
+        # 1. Human Review：requires_human=True
+        first_decision, error = run_triage(
+            self.ticket,
+            "manual",
+        )
+
+        self.assertIsNone(error)
+
+        # 2. Auto Handle：info + medium priority
+        auto_ticket = SupportTicket.objects.create(
+            customer=self.customer,
+            order=self.order,
+            category="delivery",
+            requested_action="info",
+            message="auto handle evaluation ticket",
+            status="open",
+        )
+
+        run_triage_execution_workflow(
+            auto_ticket,
+            "manual",
+        )
+
+        # 3. Human Review：requires_human=False，但 priority=high
+        high_order = Order.objects.create(
+            order_number="V2-EVAL-001",
+            shipping_address="Evaluation Test Address",
+            status="paid",
+            customer=self.customer,
+        )
+
+        OrderItem.objects.create(
+            order=high_order,
+            product=self.product,
+            quantity=1,
+            unit_price="9000.00",
+        )
+
+        high_ticket = SupportTicket.objects.create(
+            customer=self.customer,
+            order=high_order,
+            category="damaged",
+            requested_action="info",
+            message="high priority evaluation ticket",
+            status="open",
+        )
+
+        high_decision, error = run_triage(
+            high_ticket,
+            "manual",
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(high_decision.priority_level, "high")
+        self.assertFalse(high_decision.requires_human)
+
+        metrics = calculate_triage_metrics()
+
+        self.assertEqual(metrics["total_decisions"], 3)
+        self.assertEqual(metrics["human_review_count"], 2)
+        self.assertEqual(metrics["auto_handled_count"], 1)
+
+        self.assertEqual(metrics["human_review_rate"], 66.67)
+        self.assertEqual(metrics["auto_handled_rate"], 33.33)
