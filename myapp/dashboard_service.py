@@ -2,6 +2,7 @@ from .models import (
     SupportTicket,
     TriageExecutionRecord,
 )
+from .triage_service import get_risk_gate_result
 
 def get_high_risk_queue():
     tickets = SupportTicket.objects.filter(
@@ -20,10 +21,12 @@ def get_high_risk_queue():
         if latest_decision is None:
             continue
 
-        if (
-            latest_decision.requires_human
-            or latest_decision.priority_level == "high"
-        ):
+        if hasattr(latest_decision, "human_review_record"):
+            continue
+
+        route, _ = get_risk_gate_result(latest_decision)
+
+        if route == "human_review":
             high_risk_queue.append(
                 {
                     "ticket_id": ticket.id,
@@ -40,7 +43,6 @@ def get_high_risk_queue():
                     ),
                 }
             )
-
     return high_risk_queue
 
 def get_recent_execution_history(limit=5):

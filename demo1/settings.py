@@ -118,3 +118,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 2,
 }
+
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'ticket_list'
+LOGOUT_REDIRECT_URL = 'login'

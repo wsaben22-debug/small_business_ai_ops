@@ -28,6 +28,12 @@ urlpatterns = [
     path('api/generic/tickets/<int:ticket_id>/', views.SupportTicketDetailGenericAPIView.as_view(), name='support_ticket_detail_generic'),
 
     path(
+      "tickets/<int:ticket_id>/triage/",
+      views.run_ticket_triage,
+      name="run_ticket_triage",
+    ),
+
+    path(
         "triage-dashboard/",
         views.triage_dashboard,
         name="triage_dashboard",

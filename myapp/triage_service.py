@@ -7,6 +7,8 @@ from .models import (
     SupportTicket,
     TicketTriageDecision,
     TriageExecutionRecord,
+    TriageHumanReviewRecord,
+    TriageRiskGateRecord,
 )
 from django.db.models import Q
 
@@ -309,6 +311,21 @@ def evaluate_risk_gate(decision):
         "risk gate passed for automatic handling",
     )
 
+def get_risk_gate_result(decision):
+    try:
+        gate_record = decision.risk_gate_record
+
+        return (
+            gate_record.route,
+            gate_record.reason,
+        )
+
+    except (
+        TriageRiskGateRecord.DoesNotExist,
+        AttributeError,
+    ):
+        return evaluate_risk_gate(decision)
+
 def run_triage_workflow(ticket, trigger_type):
     decision, error = run_triage(ticket, trigger_type)
 
@@ -316,11 +333,18 @@ def run_triage_workflow(ticket, trigger_type):
         return None,None, error
 
     route,reason = evaluate_risk_gate(decision)
+
+    TriageRiskGateRecord.objects.create(
+        decision=decision,
+        route=route,
+        reason=reason,
+        gate_version="risk_gate_v1",
+    )
  
     return decision, route, reason
 
 def execute_low_risk_action(decision):
-    route, route_reason = evaluate_risk_gate(decision)
+    route, route_reason = get_risk_gate_result(decision)
 
     if route != "auto_handle":
         return(
@@ -406,7 +430,7 @@ def run_triage_execution_workflow(ticket, trigger_type):
     )
 
 def build_high_risk_recommendation(decision):
-    route, route_reason = evaluate_risk_gate(decision)
+    route, route_reason = get_risk_gate_result(decision)
 
     if route != "human_review":
         return None, "decision is not routed to human review"
@@ -435,8 +459,57 @@ def build_high_risk_recommendation(decision):
 
     return None, "unable to determine human review recommendation"
 
+def submit_human_review(decision, selected_action, reason):
+    route, route_reason = get_risk_gate_result(decision)
+
+    if route != "human_review":
+        return None, "decision is not routed to human review"
+
+    ticket = decision.ticket
+
+    if ticket.status not in {"open", "in_progress"}:
+        return (
+            None,
+            f"ticket status={ticket.status} is not eligible for human review",
+        )
+
+    if TriageHumanReviewRecord.objects.filter(
+        decision=decision
+    ).exists():
+        return None, "human review already exists for this decision"
+
+    valid_actions = {
+        "review_requested_action",
+        "request_more_information",
+        "escalate_high_priority_case",
+    }
+
+    if selected_action not in valid_actions:
+        return None, "selected action is not supported"
+
+    recommendation, recommendation_error = (
+        build_high_risk_recommendation(decision)
+    )
+
+    if recommendation_error is not None:
+        return None, recommendation_error
+
+    recommended_action = recommendation["recommended_action"]
+
+    review_record = TriageHumanReviewRecord.objects.create(
+        decision=decision,
+        selected_action=selected_action,
+        recommended_action_snapshot=recommended_action,
+        accepted_recommendation=(
+            selected_action == recommended_action
+        ),
+        reason=reason,
+    )
+
+    return review_record, None
+
 def build_high_risk_support_package(decision):
-    route, route_reason = evaluate_risk_gate(decision)
+    route, route_reason = get_risk_gate_result(decision)
 
     if route != "human_review":
         return None, "decision is not routed to human review"
@@ -447,8 +520,6 @@ def build_high_risk_support_package(decision):
 
     if recommendation_error is not None:
         return None, recommendation_error
-
-    ticket = decision.ticket
 
     ticket = decision.ticket
     order = ticket.order
@@ -556,4 +627,3 @@ def build_high_risk_support_package(decision):
     }
 
     return package, None
-

@@ -1,25 +1,46 @@
+# Django
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import render, redirect, get_object_or_404
+from django.views.decorators.http import require_POST
+
+# Django REST Framework
+from rest_framework import generics, permissions, status, viewsets
+from rest_framework.authentication import (
+    TokenAuthentication,
+    SessionAuthentication,
+    BasicAuthentication,
+)
+from rest_framework.decorators import (
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
+from rest_framework.filters import OrderingFilter
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+# django-filter
+from django_filters.rest_framework import DjangoFilterBackend
+
+# Local app imports
 from .models import SupportTicket
 from .forms import SupportTicketForm
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
 from .serializers import SupportTicketSerializer
-from rest_framework import status
-from rest_framework.views import APIView
-from rest_framework import generics
-from rest_framework import viewsets
-from rest_framework import permissions
 from .permissions import IsAuthenticatedWriteAdminDelete
-from rest_framework.authentication import TokenAuthentication, SessionAuthentication, BasicAuthentication
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import OrderingFilter
 from .evaluation_service import calculate_triage_metrics
 from .dashboard_service import (
     get_high_risk_queue,
     get_recent_execution_history,
 )
-from .triage_service import build_high_risk_support_package
+from .triage_service import (
+    build_high_risk_support_package,
+    run_triage_execution_workflow,
+    submit_human_review,
+)
 
+@login_required
 def ticket_list(request):
     status = request.GET.get('status')
     category = request.GET.get('category')
@@ -33,7 +54,7 @@ def ticket_list(request):
 
     return render(request, 'ticket_list.html', {'tickets': tickets, 'selected_status': status, 'selected_category' : category})
 
-
+@login_required
 def ticket_create(request):
 
     if request.method == 'POST':
@@ -48,7 +69,7 @@ def ticket_create(request):
 
     return render(request, 'ticket_form.html', {'form': form, 'title': '新增客服案件', 'button_text': '新增客服案件'})
 
-
+@login_required
 def ticket_edit(request, ticket_id):
     ticket = get_object_or_404(SupportTicket, id=ticket_id)
 
@@ -64,8 +85,12 @@ def ticket_edit(request, ticket_id):
 
     return render(request, 'ticket_form.html', {'form': form, 'title': '修改客服案件', 'button_text': '修改儲存'})
 
+@login_required
 def ticket_delete(request, ticket_id):
 
+    if not request.user.is_staff:
+        raise PermissionDenied
+    
     ticket = get_object_or_404(SupportTicket, id=ticket_id)
 
     if request.method == 'POST':
@@ -74,7 +99,41 @@ def ticket_delete(request, ticket_id):
 
     return render(request, 'ticket_confirm_delete.html', {'ticket': ticket})
 
+@login_required
+@require_POST
+def run_ticket_triage(request, ticket_id):
+    ticket = get_object_or_404(
+      SupportTicket,
+      id=ticket_id,
+    )
+
+    if ticket.triage_decisions.exists():
+        messages.warning(
+            request,
+            "This ticket has already been triaged."
+        )
+        return redirect("ticket_list")
+
+    decision, route, _, _ = run_triage_execution_workflow(
+        ticket,
+        "manual",
+        )
+
+    if decision is not None and route == "human_review":
+        return redirect(
+            "high_risk_review",
+            ticket_id=ticket.id,
+        )
+
+    return redirect("ticket_list")
+
 @api_view(['GET','POST'])
+@authentication_classes([
+    TokenAuthentication,
+    SessionAuthentication,
+    BasicAuthentication,
+])
+@permission_classes([IsAuthenticatedWriteAdminDelete])
 def support_ticket_api(request):
     if request.method == 'GET':
         tickets = SupportTicket.objects.all()
@@ -91,6 +150,12 @@ def support_ticket_api(request):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET','PUT','PATCH','DELETE'])
+@authentication_classes([
+    TokenAuthentication,
+    SessionAuthentication,
+    BasicAuthentication,
+])
+@permission_classes([IsAuthenticatedWriteAdminDelete])
 def support_ticket_detail_api(request, ticket_id):
     ticket = get_object_or_404(SupportTicket, id=ticket_id)
 
@@ -123,6 +188,16 @@ def support_ticket_detail_api(request, ticket_id):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class SupportTicketListAPIView(APIView):
+    authentication_classes = [
+        TokenAuthentication,
+        SessionAuthentication,
+        BasicAuthentication,
+    ]
+
+    permission_classes = [
+        IsAuthenticatedWriteAdminDelete,
+    ]
+
     def get(self, request):
         tickets = SupportTicket.objects.all()
         serializer = SupportTicketSerializer(tickets, many=True)
@@ -139,6 +214,16 @@ class SupportTicketListAPIView(APIView):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class SupportTicketDetailAPIView(APIView):
+    authentication_classes = [
+        TokenAuthentication,
+        SessionAuthentication,
+        BasicAuthentication,
+    ]
+
+    permission_classes = [
+        IsAuthenticatedWriteAdminDelete,
+    ]
+    
     def get(self, request, ticket_id):
         ticket = get_object_or_404(SupportTicket, id=ticket_id)
         serializer = SupportTicketSerializer(ticket)
@@ -172,13 +257,34 @@ class SupportTicketDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class SupportTicketListGenericAPIView(generics.ListCreateAPIView):
-    queryset = SupportTicket.objects.all()
+    queryset = SupportTicket.objects.all().order_by("id")
     serializer_class = SupportTicketSerializer
 
+    authentication_classes = [
+        TokenAuthentication,
+        SessionAuthentication,
+        BasicAuthentication,
+    ]
+
+    permission_classes = [
+        IsAuthenticatedWriteAdminDelete,
+    ]
+
 class SupportTicketDetailGenericAPIView(generics.RetrieveUpdateDestroyAPIView):
+    
     queryset = SupportTicket.objects.all()
     serializer_class = SupportTicketSerializer
     lookup_url_kwarg = 'ticket_id'
+
+    authentication_classes = [
+        TokenAuthentication,
+        SessionAuthentication,
+        BasicAuthentication,
+    ]
+
+    permission_classes = [
+        IsAuthenticatedWriteAdminDelete,
+    ]
 
 class SupportTicketViewSet(viewsets.ModelViewSet):
     queryset = SupportTicket.objects.all()
@@ -197,6 +303,7 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsAuthenticatedWriteAdminDelete]
 
+@login_required
 def triage_dashboard(request):
     metrics = calculate_triage_metrics()
     high_risk_queue = get_high_risk_queue()
@@ -214,7 +321,8 @@ def triage_dashboard(request):
         context,
     )
 
-def high_risk_review(request, ticket_id):
+@login_required
+def high_risk_review(request, ticket_id): 
     ticket = get_object_or_404(
         SupportTicket,
         id=ticket_id,
@@ -231,6 +339,7 @@ def high_risk_review(request, ticket_id):
             "ticket": ticket,
             "package": None,
             "error": "This ticket has no triage decision.",
+            "review_error": None,
         }
 
         return render(
@@ -238,6 +347,29 @@ def high_risk_review(request, ticket_id):
             "myapp/high_risk_review.html",
             context,
         )
+
+    review_error = None
+
+    if request.method == "POST":
+        selected_action = request.POST.get(
+            "selected_action"
+        )
+
+        reason = request.POST.get(
+            "reason",
+            "",
+        ).strip()
+
+        review_record, review_error = submit_human_review(
+            latest_decision,
+            selected_action,
+            reason,
+        )
+
+        if review_error is None:
+            return redirect(
+                "triage_dashboard"
+            )
 
     package, error = build_high_risk_support_package(
         latest_decision
@@ -247,6 +379,7 @@ def high_risk_review(request, ticket_id):
         "ticket": ticket,
         "package": package,
         "error": error,
+        "review_error": review_error,
     }
 
     return render(

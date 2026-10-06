@@ -12,6 +12,7 @@ from .models import (
     SupportTicket, 
     TicketTriageDecision,
     TriageExecutionRecord,
+    TriageRiskGateRecord,
 )
 from django.test import TestCase
 from .triage_service import (
@@ -30,8 +31,11 @@ from .triage_service import (
     run_triage_execution_workflow,
     build_high_risk_support_package,
     build_high_risk_recommendation,
+    submit_human_review,
 )
 from .evaluation_service import calculate_triage_metrics
+from django.urls import reverse
+from .dashboard_service import get_high_risk_queue
 
 class SupportTicketPermissionTests(APITestCase):
 
@@ -84,6 +88,53 @@ class SupportTicketPermissionTests(APITestCase):
             response.status_code,
             status.HTTP_401_UNAUTHORIZED
         )
+
+    def test_other_api_styles_use_same_permission_rules(self):
+        list_urls = [
+            "/api/tickets/",
+            "/api/apiview/tickets/",
+            "/api/generic/tickets/",
+        ]
+
+        detail_urls = [
+            f"/api/tickets/{self.ticket.id}/",
+            f"/api/apiview/tickets/{self.ticket.id}/",
+            f"/api/generic/tickets/{self.ticket.id}/",
+        ]
+
+        for url in list_urls:
+            with self.subTest(url=url, method="GET"):
+                response = self.client.get(url)
+                self.assertEqual(
+                    response.status_code,
+                    status.HTTP_200_OK,
+                )
+
+            with self.subTest(url=url, method="POST"):
+                response = self.client.post(
+                    url,
+                    {},
+                    format="json",
+                )
+                self.assertEqual(
+                    response.status_code,
+                    status.HTTP_401_UNAUTHORIZED,
+                )
+
+        for url in detail_urls:
+            with self.subTest(url=url, method="GET"):
+                response = self.client.get(url)
+                self.assertEqual(
+                    response.status_code,
+                    status.HTTP_200_OK,
+                )
+
+            with self.subTest(url=url, method="DELETE"):
+                response = self.client.delete(url)
+                self.assertEqual(
+                    response.status_code,
+                    status.HTTP_401_UNAUTHORIZED,
+                )
 
     def test_authenticated_user_can_create_ticket(self):
 
@@ -255,6 +306,137 @@ class SupportTicketPermissionTests(APITestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_401_UNAUTHORIZED
+        )
+
+class WebPermissionTests(TestCase):
+
+    def setUp(self):
+        self.normal_user = User.objects.create_user(
+            username="web_normal_user",
+            password="Test1234!",
+        )
+
+        self.staff_user = User.objects.create_user(
+            username="web_staff_user",
+            password="Test1234!",
+            is_staff=True,
+        )
+
+        self.customer = Customer.objects.create(
+            name="Web 權限測試客戶",
+            phone="0912345678",
+            email="web_permission@example.com",
+        )
+
+        self.order = Order.objects.create(
+            customer=self.customer,
+            shipping_address="Web 權限測試地址",
+            status="pending",
+            order_number="WEB-PERM-001",
+        )
+
+        self.ticket = SupportTicket.objects.create(
+            customer=self.customer,
+            order=self.order,
+            category="other",
+            message="Web permission test ticket",
+            status="open",
+        )
+
+    def test_anonymous_user_is_redirected_from_protected_web_views(self):
+        protected_urls = [
+            reverse("ticket_list"),
+            reverse("ticket_create"),
+            reverse("ticket_edit", args=[self.ticket.id]),
+            reverse("ticket_delete", args=[self.ticket.id]),
+            reverse("triage_dashboard"),
+            reverse("high_risk_review", args=[self.ticket.id]),
+        ]
+
+        for url in protected_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertEqual(
+                    response.status_code,
+                    302,
+                )
+
+                self.assertIn(
+                    "/login/",
+                    response.url,
+                )
+
+        decision_count_before = TicketTriageDecision.objects.count()
+
+        response = self.client.post(
+            reverse(
+                "run_ticket_triage",
+                args=[self.ticket.id],
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            302,
+        )
+
+        self.assertIn(
+            "/login/",
+            response.url,
+        )
+
+        self.assertEqual(
+            TicketTriageDecision.objects.count(),
+            decision_count_before,
+        )
+
+    def test_normal_user_cannot_delete_ticket(self):
+        self.client.force_login(self.normal_user)
+
+        delete_url = reverse(
+            "ticket_delete",
+            args=[self.ticket.id],
+        )
+
+        response = self.client.get(delete_url)
+
+        self.assertEqual(
+            response.status_code,
+            403,
+        )
+
+        list_response = self.client.get(
+            reverse("ticket_list")
+        )
+
+        self.assertNotContains(
+            list_response,
+            delete_url,
+        )
+
+    def test_staff_user_can_access_delete_ticket(self):
+        self.client.force_login(self.staff_user)
+
+        delete_url = reverse(
+            "ticket_delete",
+            args=[self.ticket.id],
+        )
+
+        response = self.client.get(delete_url)
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        list_response = self.client.get(
+            reverse("ticket_list")
+        )
+
+        self.assertContains(
+            list_response,
+            delete_url,
         )
 
 class TicketTriageWorkflowTests(TestCase):
@@ -438,6 +620,65 @@ class TicketTriageWorkflowTests(TestCase):
             second_decision.id,
         )
 
+    def test_run_ticket_triage_blocks_duplicate_decision(self):
+        user = User.objects.create_user(
+            username="triage_web_user",
+            password="Test1234!",
+        )
+
+        self.client.force_login(user)
+        
+        url = reverse(
+            "run_ticket_triage",
+            args=[self.ticket.id],
+        )
+
+        first_response = self.client.post(url)
+
+        self.assertEqual(
+            first_response.status_code,
+            302,
+        )
+
+        self.ticket.refresh_from_db()
+
+        decision_count_before = self.ticket.triage_decisions.count()
+
+        execution_count_before = TriageExecutionRecord.objects.filter(
+            decision__ticket=self.ticket,
+        ).count()
+
+        ticket_status_before = self.ticket.status
+
+        second_response = self.client.post(
+            url,
+            follow=True,
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(
+            self.ticket.triage_decisions.count(),
+            decision_count_before,
+        )
+
+        self.assertEqual(
+            TriageExecutionRecord.objects.filter(
+                decision__ticket=self.ticket,
+            ).count(),
+            execution_count_before,
+        )
+
+        self.assertEqual(
+            self.ticket.status,
+            ticket_status_before,
+        )
+
+        self.assertContains(
+            second_response,
+            "This ticket has already been triaged.",
+        )
+
     def test_decision_is_immutable(self):
 
         decision, error = run_triage(
@@ -601,6 +842,37 @@ class TicketTriageWorkflowTests(TestCase):
         self.assertEqual(route, "auto_handle")
         self.assertTrue(reason)
 
+    def test_high_risk_queue_uses_persisted_risk_gate_result(self):
+        decision, error = run_triage(
+            self.ticket,
+            "manual",
+        )
+
+        self.assertIsNone(error)
+
+        self.assertTrue(
+            decision.requires_human
+        )
+
+        TriageRiskGateRecord.objects.create(
+            decision=decision,
+            route="auto_handle",
+            reason="persisted gate result test",
+            gate_version="risk_gate_v1",
+        )
+
+        high_risk_queue = get_high_risk_queue()
+
+        queued_ticket_ids = [
+            item["ticket_id"]
+            for item in high_risk_queue
+        ]
+
+        self.assertNotIn(
+            self.ticket.id,
+            queued_ticket_ids,
+        )
+
     def test_triage_workflow_route_decision(self):
         decision, route, reason = run_triage_workflow(
             self.ticket,
@@ -610,6 +882,23 @@ class TicketTriageWorkflowTests(TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(route, "human_review")
         self.assertTrue(reason)
+
+        gate_record = decision.risk_gate_record
+
+        self.assertEqual(
+            gate_record.route,
+            route,
+        )
+
+        self.assertEqual(
+            gate_record.reason,
+            reason,
+        )
+
+        self.assertEqual(
+            gate_record.gate_version,
+            "risk_gate_v1",
+        )
 
     def test_low_risk_info_ticket_moves_to_in_progress(self):
         self.ticket.requested_action = "info"
@@ -1054,3 +1343,76 @@ class TicketTriageWorkflowTests(TestCase):
 
         self.assertEqual(metrics["human_review_rate"], 66.67)
         self.assertEqual(metrics["auto_handled_rate"], 33.33)
+
+    def test_submit_human_review_creates_record_and_blocks_duplicate(self):
+        decision, error = run_triage(
+            self.ticket,
+            "manual",
+        )
+
+        self.assertIsNone(error)
+
+        review_record, review_error = submit_human_review(
+            decision,
+            "review_requested_action",
+            "reviewer agrees with the system recommendation",
+        )
+
+        self.assertIsNone(review_error)
+        self.assertIsNotNone(review_record)
+
+        self.assertEqual(
+            review_record.selected_action,
+            "review_requested_action",
+        )
+
+        self.assertEqual(
+            review_record.recommended_action_snapshot,
+            "review_requested_action",
+        )
+
+        self.assertTrue(
+            review_record.accepted_recommendation
+        )
+
+        self.assertEqual(
+            review_record.decision,
+            decision,
+        )
+
+        duplicate_record, duplicate_error = submit_human_review(
+            decision,
+            "request_more_information",
+            "second review should not be allowed",
+        )
+
+        self.assertIsNone(duplicate_record)
+
+        self.assertEqual(
+            duplicate_error,
+            "human review already exists for this decision",
+        )
+
+    def test_submit_human_review_blocks_closed_ticket(self):
+        decision, error = run_triage(
+            self.ticket,
+            "manual",
+        )
+
+        self.assertIsNone(error)
+
+        self.ticket.status = "closed"
+        self.ticket.save(update_fields=["status"])
+
+        review_record, review_error = submit_human_review(
+            decision,
+            "review_requested_action",
+            "closed ticket should not be reviewed",
+        )
+
+        self.assertIsNone(review_record)
+
+        self.assertEqual(
+            review_error,
+            "ticket status=closed is not eligible for human review",
+        )

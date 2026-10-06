@@ -215,3 +215,62 @@ class TriageExecutionRecord(models.Model):
     created_at = models.DateTimeField(
         auto_now_add=True,
     )
+
+class TriageHumanReviewRecord(models.Model):
+
+    REVIEW_ACTION_CHOICES = [
+        ("review_requested_action", "Review Requested Action"),
+        ("request_more_information", "Request More Information"),
+        ("escalate_high_priority_case", "Escalate High Priority Case"),
+    ]
+
+    decision = models.OneToOneField(
+        TicketTriageDecision,
+        on_delete=models.PROTECT,
+        related_name="human_review_record",
+    )
+
+    selected_action = models.CharField(
+        max_length=50,
+        choices=REVIEW_ACTION_CHOICES,
+    )
+
+    recommended_action_snapshot = models.CharField(
+        max_length=50,
+    )
+
+    accepted_recommendation = models.BooleanField()
+
+    reason = models.TextField()
+
+    reviewed_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+class TriageRiskGateRecord(models.Model):
+
+    ROUTE_CHOICES = [
+        ("auto_handle", "Auto Handle"),
+        ("human_review", "Human Review"),
+    ]
+
+    decision = models.OneToOneField(
+        TicketTriageDecision,
+        on_delete=models.PROTECT,
+        related_name="risk_gate_record",
+    )
+
+    route = models.CharField(
+        max_length=20,
+        choices=ROUTE_CHOICES,
+    )
+
+    reason = models.TextField()
+
+    gate_version = models.CharField(
+        max_length=30,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
