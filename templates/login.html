@@ -1,25 +1,89 @@
+{% load static %}
+
 <!DOCTYPE html>
 <html lang="zh-Hant">
 
 <head>
     <meta charset="UTF-8">
-    <title>登入</title>
+    <title>登入｜Small Business AI Ops</title>
+
+    <link
+        rel="stylesheet"
+        href="{% static 'css/style.css' %}"
+    >
 </head>
 
-<body>
-    <h1>Small Business AI Ops</h1>
-    <h2>登入</h2>
+<body class="login-page">
 
-    {% if form.errors %}
-        <p>帳號或密碼錯誤，請重新輸入。</p>
-    {% endif %}
+    <main class="login-container">
 
-    <form method="post">
-        {% csrf_token %}
-        {{ form.as_p }}
+        <section class="login-card">
 
-        <button type="submit">登入</button>
-    </form>
+            <div class="login-brand">
+                <h1>Small Business AI Ops</h1>
+
+                <p>
+                    客服案件營運決策與自動化系統
+                </p>
+            </div>
+
+            <div class="login-heading">
+                <h2>登入系統</h2>
+
+                <p>
+                    請輸入您的帳號與密碼
+                </p>
+            </div>
+
+            {% if form.errors %}
+                <div class="login-error">
+                    帳號或密碼錯誤，請重新輸入。
+                </div>
+            {% endif %}
+
+            <form
+                method="post"
+                class="login-form"
+            >
+                {% csrf_token %}
+
+                <div class="form-group">
+                    <label for="{{ form.username.id_for_label }}">
+                        使用者名稱
+                    </label>
+
+                    {{ form.username }}
+                </div>
+
+                <div class="form-group">
+                    <label for="{{ form.password.id_for_label }}">
+                        密碼
+                    </label>
+
+                    {{ form.password }}
+                </div>
+
+                {% if next %}
+                    <input
+                        type="hidden"
+                        name="next"
+                        value="{{ next }}"
+                    >
+                {% endif %}
+
+                <button
+                    class="login-button"
+                    type="submit"
+                >
+                    登入
+                </button>
+
+            </form>
+
+        </section>
+
+    </main>
+
 </body>
 
 </html>

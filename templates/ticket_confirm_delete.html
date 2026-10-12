@@ -1,20 +1,103 @@
+{% load static %}
+
 <!DOCTYPE html>
 <html lang="zh-Hant">
+
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>刪除確認</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>確認刪除客服案件</title>
+
+    <link
+        rel="stylesheet"
+        href="{% static 'css/style.css' %}"
+    >
 </head>
+
 <body>
-  <h1>確認刪除客服案件</h1>
-  <p>您確定要刪除這個客服案件嗎？此操作無法撤銷。</p>
-  <p>訂單: {{ ticket.order.order_number }}</p>
-  <p>分類: {{ ticket.get_category_display }}</p>
-  <p>內容: {{ ticket.message }}</p>
-  <form method="post">
-    {% csrf_token %}
-    <button type="submit">確認刪除</button>
-  </form>
-  <a href="{% url 'ticket_list' %}">取消</a>
+    <div class="page-container">
+
+        <header class="form-page-header">
+            <div>
+                <h1>確認刪除客服案件</h1>
+                <p class="review-subtitle">
+                    請確認案件資訊後再執行刪除
+                </p>
+            </div>
+
+            <a
+                class="secondary-button"
+                href="{% url 'ticket_list' %}"
+            >
+                返回案件列表
+            </a>
+        </header>
+
+        <section class="delete-card">
+
+            <div class="delete-warning">
+                <strong>此操作無法撤銷</strong>
+                <p>
+                    刪除後，此客服案件將無法復原。
+                </p>
+            </div>
+
+            <div class="delete-ticket-info">
+
+                <div class="info-item">
+                    <span class="info-label">
+                        訂單編號
+                    </span>
+                    <strong>
+                        {{ ticket.order.order_number }}
+                    </strong>
+                </div>
+
+                <div class="info-item">
+                    <span class="info-label">
+                        問題分類
+                    </span>
+                    <strong>
+                        {{ ticket.get_category_display }}
+                    </strong>
+                </div>
+
+                <div class="info-item">
+                    <span class="info-label">
+                        問題內容
+                    </span>
+                    <strong>
+                        {{ ticket.message }}
+                    </strong>
+                </div>
+
+            </div>
+
+            <form method="post">
+                {% csrf_token %}
+
+                <div class="form-actions">
+
+                    <a
+                        class="secondary-button"
+                        href="{% url 'ticket_list' %}"
+                    >
+                        取消
+                    </a>
+
+                    <button
+                        class="danger-button"
+                        type="submit"
+                    >
+                        確認刪除
+                    </button>
+
+                </div>
+            </form>
+
+        </section>
+
+    </div>
 </body>
+
 </html>

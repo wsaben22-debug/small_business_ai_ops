@@ -1,194 +1,533 @@
+{% load static %}
+
 <!DOCTYPE html>
-<html>
+<html lang="zh-Hant">
+
 <head>
     <meta charset="UTF-8">
-    <title>High Risk Review</title>
+    <title>高風險案件人工審核</title>
+
+    <link
+        rel="stylesheet"
+        href="{% static 'css/style.css' %}"
+    >
 </head>
+
 <body>
+    <div class="page-container">
 
-    <h1>High Risk Ticket Review</h1>
+        <header class="review-header">
+            <div>
+                <h1>高風險案件人工審核</h1>
+                <p class="review-subtitle">
+                    檢視案件評估結果、決策建議與相關營運資訊
+                </p>
+            </div>
 
-    <p>
-        <a href="{% url 'triage_dashboard' %}">
-            Back to Dashboard
-        </a>
-    </p>
+            <a
+                class="secondary-button"
+                href="{% url 'triage_dashboard' %}"
+            >
+                返回決策儀表板
+            </a>
+        </header>
 
-    {% if error %}
-        <p>{{ error }}</p>
-    {% elif package %}
+        {% if error %}
 
-        <h2>Ticket</h2>
+            <section class="review-section">
+                <p>{{ error }}</p>
+            </section>
 
-        <p>Ticket ID: {{ package.ticket_id }}</p>
-        <p>Category: {{ package.category }}</p>
-        <p>Requested Action: {{ package.requested_action }}</p>
-        <p>Route: {{ package.route }}</p>
-        <p>Route Reason: {{ package.route_reason }}</p>
+        {% elif package %}
 
+            <!-- Ticket Overview -->
+            <section class="review-section">
+                <h2>案件摘要</h2>
 
-        <h2>Priority</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">案件 ID</span>
+                        <strong>{{ package.ticket_id }}</strong>
+                    </div>
 
-        <p>
-            Level:
-            {{ package.priority.level }}
-        </p>
+                    <div class="info-item">
+                        <span class="info-label">問題分類</span>
+                        <strong>
+                            {% if package.category == "delivery" %}
+                                配送問題
+                            {% elif package.category == "damaged" %}
+                                商品損壞
+                            {% elif package.category == "missing" %}
+                                商品缺失
+                            {% elif package.category == "refund" %}
+                                退貨問題
+                            {% elif package.category == "other" %}
+                                其他問題
+                            {% else %}
+                                {{ package.category }}
+                            {% endif %}
+                        </strong>
+                    </div>
 
-        <p>
-            Score:
-            {{ package.priority.score }}
-        </p>
+                    <div class="info-item">
+                        <span class="info-label">請求動作</span>
+                        <strong>
+                            {% if package.requested_action == "info" %}
+                                資訊查詢
+                            {% elif package.requested_action == "exchange" %}
+                                換貨
+                            {% elif package.requested_action == "refund" %}
+                                退款
+                            {% elif package.requested_action == "compensation" %}
+                                補償
+                            {% elif package.requested_action == "other" %}
+                                其他處理
+                            {% else %}
+                                {{ package.requested_action }}
+                            {% endif %}
+                        </strong>
+                    </div>
 
+                    <div class="info-item">
+                        <span class="info-label">分流結果</span>
+                        <strong>
+                            {% if package.route == "human_review" %}
+                                人工審核
+                            {% elif package.route == "auto_handle" %}
+                                自動處理
+                            {% else %}
+                                {{ package.route }}
+                            {% endif %}
+                        </strong>
+                    </div>
+                </div>
 
-        <h2>Assessment</h2>
+                <p class="review-note">
+                    {% if package.route_reason == "requested_action=refund requires human review by default" %}
+                        退款請求需由人工審核
+                    {% elif package.route_reason == "requested_action=exchange requires human review by default" %}
+                        換貨請求需由人工審核
+                    {% elif package.route_reason == "requested_action=compensation requires human review by default" %}
+                        補償請求需由人工審核
+                    {% elif package.route_reason == "requested_action=other requires human review by default" %}
+                        此類處理請求需由人工審核
+                    {% elif package.route_reason == "high priority requires human review" %}
+                        高優先案件需由人工審核
+                    {% else %}
+                        {{ package.route_reason }}
+                    {% endif %}
+                </p>
+            </section>
 
-        <h3>Severity</h3>
-        <p>
-            {{ package.severity.level }}
-            /
-            {{ package.severity.score }}
-        </p>
-        <p>{{ package.severity.reason }}</p>
+            <!-- Priority -->
+            <section class="review-section">
+                <h2>優先等級</h2>
 
-        <h3>Impact</h3>
-        <p>
-            {{ package.impact.level }}
-            /
-            {{ package.impact.score }}
-        </p>
-        <p>{{ package.impact.reason }}</p>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">等級</span>
+                        <strong>
+                            {% if package.priority.level == "low" %}
+                                低優先
+                            {% elif package.priority.level == "medium" %}
+                                中優先
+                            {% elif package.priority.level == "high" %}
+                                高優先
+                            {% else %}
+                                {{ package.priority.level }}
+                            {% endif %}
+                        </strong>
+                    </div>
 
-        <h3>Urgency</h3>
-        <p>
-            {{ package.urgency.level }}
-            /
-            {{ package.urgency.score }}
-        </p>
-        <p>{{ package.urgency.reason }}</p>
+                    <div class="info-item">
+                        <span class="info-label">分數</span>
+                        <strong>{{ package.priority.score }}</strong>
+                    </div>
+                </div>
+            </section>
 
+            <!-- Assessment -->
+            <section class="review-section">
+                <h2>案件評估</h2>
 
-        <h2>Customer</h2>
+                <div class="assessment-grid">
 
-        <p>Name: {{ package.customer.name }}</p>
-        <p>Email: {{ package.customer.email }}</p>
-        <p>Phone: {{ package.customer.phone }}</p>
+                    <div class="assessment-card">
+                        <h3>嚴重程度</h3>
+                        <p>
+                            {% if package.severity.level == "low" %}
+                                低
+                            {% elif package.severity.level == "medium" %}
+                                中
+                            {% elif package.severity.level == "high" %}
+                                高
+                            {% else %}
+                                {{ package.severity.level }}
+                            {% endif %}
+                            /
+                            {{ package.severity.score }}
+                        </p>
+                        <p class="review-note">
+                            {% if package.category == "damaged" %}
+                                問題分類為商品損壞，嚴重程度評估為高
+                            {% elif package.category == "delivery" %}
+                                問題分類為配送問題，依目前規則完成嚴重程度評估
+                            {% elif package.category == "missing" %}
+                                問題分類為商品缺失，依目前規則完成嚴重程度評估
+                            {% elif package.category == "refund" %}
+                                問題分類為退貨問題，依目前規則完成嚴重程度評估
+                            {% elif package.category == "other" %}
+                                問題分類為其他問題，依目前規則完成嚴重程度評估
+                            {% else %}
+                                {{ package.severity.reason }}
+                            {% endif %}
+                        </p>
+                    </div>
 
+                    <div class="assessment-card">
+                        <h3>影響程度</h3>
+                        <p>
+                            {% if package.impact.level == "low" %}
+                                低
+                            {% elif package.impact.level == "medium" %}
+                                中
+                            {% elif package.impact.level == "high" %}
+                                高
+                            {% else %}
+                                {{ package.impact.level }}
+                            {% endif %}
+                            /
+                            {{ package.impact.score }}
+                        </p>
+                        <p class="review-note">
+                            訂單金額為 {{ package.order_total }}，
+                            影響程度評估為
+                            {% if package.impact.level == "low" %}
+                                低
+                            {% elif package.impact.level == "medium" %}
+                                中
+                            {% elif package.impact.level == "high" %}
+                                高
+                            {% else %}
+                                {{ package.impact.level }}
+                            {% endif %}
+                        </p>
+                    </div>
 
-        <h2>Order</h2>
+                    <div class="assessment-card">
+                        <h3>緊急程度</h3>
+                        <p>
+                            {% if package.urgency.level == "low" %}
+                                低
+                            {% elif package.urgency.level == "medium" %}
+                                中
+                            {% elif package.urgency.level == "high" %}
+                                高
+                            {% else %}
+                                {{ package.urgency.level }}
+                            {% endif %}
+                            /
+                            {{ package.urgency.score }}
+                        </p>
+                        <p class="review-note">
+                            等待時間約 {{ package.waiting_hours|floatformat:2 }} 小時，
+                            緊急程度評估為
+                            {% if package.urgency.level == "low" %}
+                                低
+                            {% elif package.urgency.level == "medium" %}
+                                中
+                            {% elif package.urgency.level == "high" %}
+                                高
+                            {% else %}
+                                {{ package.urgency.level }}
+                            {% endif %}
+                        </p>
+                    </div>
 
-        <p>Order Number: {{ package.order.order_number }}</p>
-        <p>Status: {{ package.order.status }}</p>
-        <p>Order Total: {{ package.order_total }}</p>
-        <p>Shipping Address: {{ package.order.shipping_address }}</p>
+                </div>
+            </section>
 
+            <!-- Customer / Order -->
+            <section class="review-section">
+                <h2>客戶與訂單資訊</h2>
 
-        <h2>Decision Support</h2>
+                <div class="two-column-grid">
 
-        <p>
-            Recommended Action:
-            {{ package.decision_support.recommended_action }}
-        </p>
+                    <div class="detail-card">
+                        <h3>客戶資訊</h3>
 
-        <p>
-            Recommendation Reason:
-            {{ package.decision_support.recommendation_reason }}
-        </p>
+                        <p>
+                            <span class="info-label">姓名</span>
+                            {{ package.customer.name }}
+                        </p>
 
-        <h3>Available Options</h3>
+                        <p>
+                            <span class="info-label">電子郵件</span>
+                            {{ package.customer.email }}
+                        </p>
 
-        <ul>
-            {% for option in package.decision_support.options %}
-                <li>{{ option }}</li>
-            {% endfor %}
-        </ul>
+                        <p>
+                            <span class="info-label">電話</span>
+                            {{ package.customer.phone }}
+                        </p>
+                    </div>
 
-        <h2>Submit Human Review</h2>
+                    <div class="detail-card">
+                        <h3>訂單資訊</h3>
 
-        {% if review_error %}
-            <p>{{ review_error }}</p>
-        {% endif %}
+                        <p>
+                            <span class="info-label">訂單編號</span>
+                            {{ package.order.order_number }}
+                        </p>
 
-        <form method="post">
-            {% csrf_token %}
+                        <p>
+                            <span class="info-label">訂單狀態</span>
+                            {% if package.order.status == "paid" %}
+                                已付款
+                            {% elif package.order.status == "pending" %}
+                                待處理
+                            {% else %}
+                                {{ package.order.status }}
+                            {% endif %}
+                        </p>
 
-            <p>
-                <label for="selected_action">
-                    Selected Action:
-                </label>
+                        <p>
+                            <span class="info-label">訂單金額</span>
+                            {{ package.order_total }}
+                        </p>
 
-                <select
-                    name="selected_action"
-                    id="selected_action"
-                    required
+                        <p>
+                            <span class="info-label">配送地址</span>
+                            {{ package.order.shipping_address }}
+                        </p>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- Decision Support -->
+            <section class="review-section">
+                <h2>決策建議</h2>
+
+                <div class="detail-card">
+                    <p>
+                        <span class="info-label">建議動作</span>
+                        {% if package.decision_support.recommended_action == "review_requested_action" %}
+                            審核客戶請求
+                        {% elif package.decision_support.recommended_action == "request_more_information" %}
+                            請求更多資訊
+                        {% elif package.decision_support.recommended_action == "escalate_high_priority_case" %}
+                            升級高優先案件
+                        {% else %}
+                            {{ package.decision_support.recommended_action }}
+                        {% endif %}
+                    </p>
+
+                    <p>
+                        <span class="info-label">建議原因</span>
+                        {% if package.decision_support.recommendation_reason == "requested_action=refund requires human review by default" %}
+                            退款請求需由人工審核
+                        {% elif package.decision_support.recommendation_reason == "requested_action=exchange requires human review by default" %}
+                            換貨請求需由人工審核
+                        {% elif package.decision_support.recommendation_reason == "requested_action=compensation requires human review by default" %}
+                            補償請求需由人工審核
+                        {% elif package.decision_support.recommendation_reason == "requested_action=other requires human review by default" %}
+                            此類處理請求需由人工審核
+                        {% elif package.decision_support.recommendation_reason == "high priority requires escalation" %}
+                            高優先案件建議升級處理
+                        {% else %}
+                            {{ package.decision_support.recommendation_reason }}
+                        {% endif %}
+                    </p>
+
+                    <h3>可選處理方式</h3>
+
+                    <ul>
+                        {% for option in package.decision_support.options %}
+                            <li>
+                                {% if option == "review_requested_action" %}
+                                    審核客戶請求
+                                {% elif option == "request_more_information" %}
+                                    請求更多資訊
+                                {% elif option == "escalate_high_priority_case" %}
+                                    升級高優先案件
+                                {% else %}
+                                    {{ option }}
+                                {% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Human Review Form -->
+            <section class="review-section">
+                <h2>提交人工審核</h2>
+
+                {% if review_error %}
+                    <p class="review-error">
+                        {{ review_error }}
+                    </p>
+                {% endif %}
+
+                <form
+                    method="post"
+                    class="review-form"
                 >
-                    <option value="">
-                        -- Select Action --
-                    </option>
+                    {% csrf_token %}
 
-                    {% for option in package.decision_support.options %}
-                        <option value="{{ option }}">
-                            {{ option }}
-                        </option>
-                    {% endfor %}
-                </select>
-            </p>
+                    <div class="form-group">
+                        <label for="selected_action">
+                            選擇處理方式
+                        </label>
 
-            <p>
-                <label for="reason">
-                    Review Reason:
-                </label>
-            </p>
+                        <select
+                            name="selected_action"
+                            id="selected_action"
+                            required
+                        >
+                            <option value="">
+                                請選擇處理方式
+                            </option>
 
-            <p>
-                <textarea
-                    name="reason"
-                    id="reason"
-                    rows="5"
-                    cols="60"
-                    required
-                ></textarea>
-            </p>
+                            {% for option in package.decision_support.options %}
+                                <option value="{{ option }}">
+                                    {% if option == "review_requested_action" %}
+                                        審核客戶請求
+                                    {% elif option == "request_more_information" %}
+                                        請求更多資訊
+                                    {% elif option == "escalate_high_priority_case" %}
+                                        升級高優先案件
+                                    {% else %}
+                                        {{ option }}
+                                    {% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
 
-            <button type="submit">
-                Submit Review
-            </button>
-        </form>
+                    <div class="form-group">
+                        <label for="reason">
+                            人工審核原因
+                        </label>
 
-        <h2>Ticket History</h2>
+                        <textarea
+                            name="reason"
+                            id="reason"
+                            rows="5"
+                            required
+                        ></textarea>
+                    </div>
 
-        <p>
-            Prior Ticket Count:
-            {{ package.ticket_history.prior_ticket_count }}
-        </p>
+                    <button
+                        class="action-button"
+                        type="submit"
+                    >
+                        提交人工審核
+                    </button>
+                </form>
+            </section>
 
-        <p>
-            Same Category Count:
-            {{ package.ticket_history.same_category_ticket_count }}
-        </p>
+            <!-- Ticket History -->
+            <section class="review-section">
+                <h2>案件歷史</h2>
 
-        {% if package.ticket_history.recent_tickets %}
-            <table border="1" cellpadding="8">
-                <tr>
-                    <th>Ticket ID</th>
-                    <th>Category</th>
-                    <th>Requested Action</th>
-                    <th>Status</th>
-                </tr>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">
+                            過往案件數
+                        </span>
+                        <strong>
+                            {{ package.ticket_history.prior_ticket_count }}
+                        </strong>
+                    </div>
 
-                {% for history_ticket in package.ticket_history.recent_tickets %}
-                <tr>
-                    <td>{{ history_ticket.ticket_id }}</td>
-                    <td>{{ history_ticket.category }}</td>
-                    <td>{{ history_ticket.requested_action }}</td>
-                    <td>{{ history_ticket.status }}</td>
-                </tr>
-                {% endfor %}
-            </table>
-        {% else %}
-            <p>No prior tickets.</p>
+                    <div class="info-item">
+                        <span class="info-label">
+                            相同分類案件數
+                        </span>
+                        <strong>
+                            {{ package.ticket_history.same_category_ticket_count }}
+                        </strong>
+                    </div>
+                </div>
+
+                {% if package.ticket_history.recent_tickets %}
+                    <table class="ops-table">
+                        <thead>
+                            <tr>
+                                <th>案件 ID</th>
+                                <th>問題分類</th>
+                                <th>請求動作</th>
+                                <th>案件狀態</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            {% for history_ticket in package.ticket_history.recent_tickets %}
+                                <tr>
+                                    <td>
+                                        {{ history_ticket.ticket_id }}
+                                    </td>
+
+                                    <td>
+                                        {% if history_ticket.category == "delivery" %}
+                                            配送問題
+                                        {% elif history_ticket.category == "damaged" %}
+                                            商品損壞
+                                        {% elif history_ticket.category == "missing" %}
+                                            商品缺失
+                                        {% elif history_ticket.category == "refund" %}
+                                            退貨問題
+                                        {% elif history_ticket.category == "other" %}
+                                            其他問題
+                                        {% else %}
+                                            {{ history_ticket.category }}
+                                        {% endif %}
+                                    </td>
+
+                                    <td>
+                                        {% if history_ticket.requested_action == "info" %}
+                                            資訊查詢
+                                        {% elif history_ticket.requested_action == "exchange" %}
+                                            換貨
+                                        {% elif history_ticket.requested_action == "refund" %}
+                                            退款
+                                        {% elif history_ticket.requested_action == "compensation" %}
+                                            補償
+                                        {% elif history_ticket.requested_action == "other" %}
+                                            其他處理
+                                        {% else %}
+                                            {{ history_ticket.requested_action }}
+                                        {% endif %}
+                                    </td>
+
+                                    <td>
+                                        {% if history_ticket.status == "open" %}
+                                            待處理
+                                        {% elif history_ticket.status == "in_progress" %}
+                                            處理中
+                                        {% elif history_ticket.status == "resolved" %}
+                                            已解決
+                                        {% elif history_ticket.status == "closed" %}
+                                            已關閉
+                                        {% else %}
+                                            {{ history_ticket.status }}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                {% else %}
+                    <p>目前沒有過往案件紀錄。</p>
+                {% endif %}
+            </section>
+
         {% endif %}
 
-    {% endif %}
-
+    </div>
 </body>
+
 </html>

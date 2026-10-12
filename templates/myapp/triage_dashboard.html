@@ -1,94 +1,306 @@
+{% load static %}
+
 <!DOCTYPE html>
-<html>
+<html lang="zh-Hant">
+
 <head>
     <meta charset="UTF-8">
-    <title>Triage Dashboard</title>
+    <title>客服案件決策儀表板</title>
+
+    <link
+        rel="stylesheet"
+        href="{% static 'css/style.css' %}"
+    >
 </head>
+
 <body>
+    <div class="page-container">
 
-    <h1>Support Ticket Triage Dashboard</h1>
+        <header class="dashboard-header">
 
-    <h2>Total Decisions</h2>
-    <p>{{ metrics.total_decisions }}</p>
+            <div>
+                <h1>客服案件決策儀表板</h1>
+                <p class="review-subtitle">
+                    查看案件決策、人工審核與自動處理狀況
+                </p>
+            </div>
 
-    <h2>Human Review</h2>
-    <p>
-        {{ metrics.human_review_count }}
-        ({{ metrics.human_review_rate }}%)
-    </p>
+            <div class="header-actions">
 
-    <h2>Auto Handled</h2>
-    <p>
-        {{ metrics.auto_handled_count }}
-        ({{ metrics.auto_handled_rate }}%)
-    </p>
+                <a
+                    class="secondary-button"
+                    href="{% url 'ticket_list' %}"
+                >
+                    客服案件列表
+                </a>
 
-    <hr>
+                <form
+                    method="post"
+                    action="{% url 'logout' %}"
+                    class="logout-form"
+                >
+                    {% csrf_token %}
 
-    <h2>High Risk Queue</h2>
+                    <button
+                        class="secondary-button logout-button"
+                        type="submit"
+                    >
+                        登出
+                    </button>
+                </form>
 
-    {% if high_risk_queue %}
-        <table border="1" cellpadding="8">
-            <tr>
-                <th>Ticket ID</th>
-                <th>Category</th>
-                <th>Requested Action</th>
-                <th>Priority</th>
-                <th>Score</th>
-                <th>Reason</th>
-                <th>Review</th>
-            </tr>
+            </div>
 
-            {% for item in high_risk_queue %}
-            <tr>
-                <td>{{ item.ticket_id }}</td>
-                <td>{{ item.category }}</td>
-                <td>{{ item.requested_action }}</td>
-                <td>{{ item.priority_level }}</td>
-                <td>{{ item.priority_score }}</td>
-                <td>{{ item.reason }}</td>
-                <td>
-                    <a href="{% url 'high_risk_review' item.ticket_id %}">
-                        Review
-                    </a>
-                </td>
-            </tr>
-            {% endfor %}
-        </table>
-    {% else %}
-        <p>No high-risk tickets currently require human review.</p>
-    {% endif %}
+        </header>
 
-    <hr>
+        <!-- Summary Cards -->
+        <section class="summary-grid">
 
-    <h2>Recent Execution History</h2>
+            <div class="summary-card">
+                <h2>總決策數</h2>
+                <p class="summary-value">
+                    {{ metrics.total_decisions }}
+                </p>
+                <p class="summary-detail">
+                    全部決策
+                </p>
+            </div>
 
-    {% if recent_execution_history %}
-        <table border="1" cellpadding="8">
-            <tr>
-                <th>Ticket ID</th>
-                <th>Action</th>
-                <th>Status</th>
-                <th>Before</th>
-                <th>After</th>
-                <th>Reason</th>
-                <th>Executed At</th>
-            </tr>
+            <div class="summary-card">
+                <h2>人工審核</h2>
+                <p class="summary-value">
+                    {{ metrics.human_review_count }}
+                </p>
+                <p class="summary-detail">
+                    {{ metrics.human_review_rate }}%
+                </p>
+            </div>
 
-            {% for item in recent_execution_history %}
-            <tr>
-                <td>{{ item.ticket_id }}</td>
-                <td>{{ item.action_code }}</td>
-                <td>{{ item.execution_status }}</td>
-                <td>{{ item.status_before }}</td>
-                <td>{{ item.status_after }}</td>
-                <td>{{ item.reason }}</td>
-                <td>{{ item.created_at }}</td>
-            </tr>
-            {% endfor %}
-        </table>
-    {% else %}
-        <p>No execution history yet.</p>
-    {% endif %}
+            <div class="summary-card">
+                <h2>自動處理</h2>
+                <p class="summary-value">
+                    {{ metrics.auto_handled_count }}
+                </p>
+                <p class="summary-detail">
+                    {{ metrics.auto_handled_rate }}%
+                </p>
+            </div>
+
+        </section>
+
+        <hr>
+
+        <!-- High Risk Queue -->
+        <section>
+            <h2>待人工審核案件</h2>
+
+            {% if high_risk_queue %}
+                <table class="ops-table">
+                    <thead>
+                        <tr>
+                            <th>案件 ID</th>
+                            <th>問題分類</th>
+                            <th>請求動作</th>
+                            <th>優先等級</th>
+                            <th>分數</th>
+                            <th>審核原因</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for item in high_risk_queue %}
+                            <tr>
+                                <td>{{ item.ticket_id }}</td>
+                                <td>
+                                    {% if item.category == "delivery" %}
+                                        配送問題
+                                    {% elif item.category == "damaged" %}
+                                        商品損壞
+                                    {% elif item.category == "missing" %}
+                                        商品缺失
+                                    {% elif item.category == "refund" %}
+                                        退貨問題
+                                    {% elif item.category == "other" %}
+                                        其他問題
+                                    {% else %}
+                                        {{ item.category }}
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if item.requested_action == "info" %}
+                                        資訊查詢
+                                    {% elif item.requested_action == "exchange" %}
+                                        換貨
+                                    {% elif item.requested_action == "refund" %}
+                                        退款
+                                    {% elif item.requested_action == "compensation" %}
+                                        補償
+                                    {% elif item.requested_action == "other" %}
+                                        其他處理
+                                    {% else %}
+                                        {{ item.requested_action }}
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if item.priority_level == "low" %}
+                                        <span class="status-badge priority-low">
+                                            低優先
+                                        </span>
+
+                                    {% elif item.priority_level == "medium" %}
+                                        <span class="status-badge priority-medium">
+                                            中優先
+                                        </span>
+
+                                    {% elif item.priority_level == "high" %}
+                                        <span class="status-badge priority-high">
+                                            高優先
+                                        </span>
+
+                                    {% else %}
+                                        {{ item.priority_level }}
+                                    {% endif %}
+                                </td>
+                                <td>{{ item.priority_score }}</td>
+                                <td>
+                                    {% if item.reason == "requested_action=exchange requires human review by default" %}
+                                        換貨請求需由人工審核
+
+                                    {% elif item.reason == "requested_action=refund requires human review by default" %}
+                                        退款請求需由人工審核
+
+                                    {% elif item.reason == "requested_action=compensation requires human review by default" %}
+                                        補償請求需由人工審核
+
+                                    {% elif item.reason == "requested_action=other requires human review by default" %}
+                                        此類處理請求需由人工審核
+
+                                    {% elif item.reason == "high priority requires human review" %}
+                                        高優先案件需由人工審核
+
+                                    {% else %}
+                                        {{ item.reason }}
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a class="action-button" href="{% url 'high_risk_review' item.ticket_id %}">人工審核
+                                    </a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+            {% else %}
+                <p>目前沒有需要人工審核的高風險案件。</p>
+            {% endif %}
+        </section>
+
+        <hr>
+
+        <!-- Recent Execution History -->
+        <section>
+            <h2>最近執行紀錄</h2>
+
+            {% if recent_execution_history %}
+                <table class="ops-table">
+                    <thead>
+                        <tr>
+                            <th>案件 ID</th>
+                            <th>執行動作</th>
+                            <th>執行結果</th>
+                            <th>處理前</th>
+                            <th>處理後</th>
+                            <th>執行原因</th>
+                            <th>執行時間</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        {% for item in recent_execution_history %}
+                            <tr>
+                                <td>{{ item.ticket_id }}</td>
+
+                                <td>
+                                    {% if item.action_code == "info_triage_prepared" %}
+                                        資訊案件預處理
+                                    {% else %}
+                                        {{ item.action_code }}
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if item.execution_status == "success" %}
+                                        <span class="status-badge status-success">
+                                            執行成功
+                                        </span>
+
+                                    {% elif item.execution_status == "skipped" %}
+                                        <span class="status-badge status-skipped">
+                                            已略過
+                                        </span>
+
+                                    {% elif item.execution_status == "failed" %}
+                                        <span class="status-badge status-failed">
+                                            執行失敗
+                                        </span>
+
+                                    {% else %}
+                                        {{ item.execution_status }}
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if item.status_before == "open" %}
+                                        待處理
+                                    {% elif item.status_before == "in_progress" %}
+                                        處理中
+                                    {% elif item.status_before == "resolved" %}
+                                        已解決
+                                    {% elif item.status_before == "closed" %}
+                                        已關閉
+                                    {% else %}
+                                        {{ item.status_before }}
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if item.status_after == "open" %}
+                                        待處理
+                                    {% elif item.status_after == "in_progress" %}
+                                        處理中
+                                    {% elif item.status_after == "resolved" %}
+                                        已解決
+                                    {% elif item.status_after == "closed" %}
+                                        已關閉
+                                    {% else %}
+                                        {{ item.status_after }}
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {% if item.reason == "low-risk info ticket moved to in_progress" %}
+                                        低風險資訊案件已移至處理中
+                                    {% else %}
+                                        {{ item.reason }}
+                                    {% endif %}
+                                </td>
+
+                                <td>
+                                    {{ item.created_at }}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+            {% else %}
+                <p>目前尚無執行紀錄。</p>
+            {% endif %}
+        </section>
+
+    </div>
 </body>
+
 </html>

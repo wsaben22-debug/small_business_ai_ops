@@ -1,23 +1,68 @@
+{% load static %}
+
 <!DOCTYPE html>
 <html lang="zh-Hant">
 
 <head>
     <meta charset="UTF-8">
-    <title>新增客服案件</title>
+    <title>{{ title }}</title>
+
+    <link
+        rel="stylesheet"
+        href="{% static 'css/style.css' %}"
+    >
 </head>
 
 <body>
+    <div class="page-container">
 
-    <h1>{{ title }}</h1>
+        <header class="form-page-header">
+            <div>
+                <h1>{{ title }}</h1>
+                <p class="review-subtitle">
+                    填寫客服案件資訊，建立後可進行案件評估與風險分流
+                </p>
+            </div>
 
-    <form method="post">
-    {% csrf_token %}
+            <a
+                class="secondary-button"
+                href="{% url 'ticket_list' %}"
+            >
+                返回案件列表
+            </a>
+        </header>
 
-    {{ form.as_p }}
+        <section class="form-card">
 
-    <button type="submit">{{ button_text }}</button>
-</form>
-<a href="{% url 'ticket_list' %}">返回客服案件列表</a>
+            <form
+                method="post"
+                class="ticket-form"
+            >
+                {% csrf_token %}
+
+                {{ form.as_p }}
+
+                <div class="form-actions">
+                    <button
+                        class="action-button"
+                        type="submit"
+                    >
+                        {{ button_text }}
+                    </button>
+
+                    <a
+                        class="secondary-button"
+                        href="{% url 'ticket_list' %}"
+                    >
+                        取消
+                    </a>
+                </div>
+
+            </form>
+
+        </section>
+
+    </div>
 </body>
 
 </html>
