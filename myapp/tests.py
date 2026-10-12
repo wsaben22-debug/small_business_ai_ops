@@ -72,9 +72,9 @@ class SupportTicketPermissionTests(APITestCase):
             is_staff=True
         )
 
-    def test_anonymous_can_read_ticket_list(self):
+    def test_anonymous_cannot_read_ticket_list(self):
         response = self.client.get('/api/viewset/tickets/')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_anonymous_cannot_create_ticket(self):
 
@@ -107,7 +107,7 @@ class SupportTicketPermissionTests(APITestCase):
                 response = self.client.get(url)
                 self.assertEqual(
                     response.status_code,
-                    status.HTTP_200_OK,
+                    status.HTTP_401_UNAUTHORIZED,
                 )
 
             with self.subTest(url=url, method="POST"):
@@ -126,7 +126,7 @@ class SupportTicketPermissionTests(APITestCase):
                 response = self.client.get(url)
                 self.assertEqual(
                     response.status_code,
-                    status.HTTP_200_OK,
+                    status.HTTP_401_UNAUTHORIZED,
                 )
 
             with self.subTest(url=url, method="DELETE"):
@@ -163,6 +163,16 @@ class SupportTicketPermissionTests(APITestCase):
             SupportTicket.objects.filter(
                 message='自動測試建立案件'
             ).exists()
+        )
+
+    def test_authenticated_user_can_read_ticket_list(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get('/api/viewset/tickets/')
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK
         )
 
     def test_normal_user_cannot_delete_ticket(self):
