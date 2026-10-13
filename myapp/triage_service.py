@@ -487,6 +487,9 @@ def submit_human_review(decision, selected_action, reason):
     if selected_action not in valid_actions:
         return None, "selected action is not supported"
 
+    if not reason or not reason.strip():
+        return None, "human review reason is required"
+
     recommendation, recommendation_error = (
         build_high_risk_recommendation(decision)
     )

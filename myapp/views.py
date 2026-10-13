@@ -2,15 +2,16 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.shortcuts import render, redirect, get_object_or_404
+from django.db.models.deletion import ProtectedError
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 # Django REST Framework
 from rest_framework import generics, permissions, status, viewsets
 from rest_framework.authentication import (
-    TokenAuthentication,
-    SessionAuthentication,
     BasicAuthentication,
+    SessionAuthentication,
+    TokenAuthentication,
 )
 from rest_framework.decorators import (
     api_view,
@@ -25,15 +26,15 @@ from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
 
 # Local app imports
-from .models import SupportTicket
-from .forms import SupportTicketForm
-from .serializers import SupportTicketSerializer
-from .permissions import IsAuthenticatedWriteAdminDelete
-from .evaluation_service import calculate_triage_metrics
 from .dashboard_service import (
     get_high_risk_queue,
     get_recent_execution_history,
 )
+from .evaluation_service import calculate_triage_metrics
+from .forms import SupportTicketForm
+from .models import SupportTicket
+from .permissions import IsAuthenticatedWriteAdminDelete
+from .serializers import SupportTicketSerializer
 from .triage_service import (
     build_high_risk_support_package,
     run_triage_execution_workflow,
@@ -94,7 +95,18 @@ def ticket_delete(request, ticket_id):
     ticket = get_object_or_404(SupportTicket, id=ticket_id)
 
     if request.method == 'POST':
-        ticket.delete()
+        try:
+            ticket.delete()
+        except ProtectedError:
+            return render(
+                request,
+                'ticket_confirm_delete.html',
+                {
+                    'ticket': ticket,
+                    'error_message': '此案件已有評估紀錄，無法刪除。',
+                },
+            )
+
         return redirect('ticket_list')
 
     return render(request, 'ticket_confirm_delete.html', {'ticket': ticket})
@@ -184,7 +196,14 @@ def support_ticket_detail_api(request, ticket_id):
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
 
     elif request.method == 'DELETE':
-        ticket.delete()
+        try:
+            ticket.delete()
+        except ProtectedError:
+            return Response(
+                {'detail': '此案件已有評估紀錄，無法刪除。'},
+                status=status.HTTP_409_CONFLICT
+            )
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class SupportTicketListAPIView(APIView):
@@ -253,7 +272,15 @@ class SupportTicketDetailAPIView(APIView):
 
     def delete(self, request, ticket_id):
         ticket = get_object_or_404(SupportTicket, id=ticket_id)
-        ticket.delete()
+
+        try:
+            ticket.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "此案件已有評估紀錄，無法刪除。"},
+                status=status.HTTP_409_CONFLICT
+            )
+
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 class SupportTicketListGenericAPIView(generics.ListCreateAPIView):
@@ -286,6 +313,16 @@ class SupportTicketDetailGenericAPIView(generics.RetrieveUpdateDestroyAPIView):
         IsAuthenticatedWriteAdminDelete,
     ]
 
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+
+        except ProtectedError:
+            return Response(
+                {"detail": "此案件已有評估紀錄，無法刪除。"},
+                status=status.HTTP_409_CONFLICT
+            )
+
 class SupportTicketViewSet(viewsets.ModelViewSet):
     queryset = SupportTicket.objects.all()
     serializer_class = SupportTicketSerializer
@@ -302,6 +339,16 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
     ]
 
     permission_classes = [IsAuthenticatedWriteAdminDelete]
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+
+        except ProtectedError:
+            return Response(
+                {"detail": "此案件已有評估紀錄，無法刪除。"},
+                status=status.HTTP_409_CONFLICT
+            )
 
 @login_required
 def triage_dashboard(request):

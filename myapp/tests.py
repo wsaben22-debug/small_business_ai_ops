@@ -275,6 +275,98 @@ class SupportTicketPermissionTests(APITestCase):
             SupportTicket.objects.filter(id=self.ticket.id).exists()
         )
 
+    def test_staff_cannot_delete_evaluated_ticket_via_api(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.delete(
+            f"/api/tickets/{self.ticket.id}/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_409_CONFLICT
+        )
+
+        self.assertTrue(
+            SupportTicket.objects.filter(
+                id=self.ticket.id
+            ).exists()
+        )
+
+    def test_staff_cannot_delete_evaluated_ticket_via_apiview(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.delete(
+            f"/api/apiview/tickets/{self.ticket.id}/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_409_CONFLICT
+        )
+
+        self.assertTrue(
+            SupportTicket.objects.filter(
+                id=self.ticket.id
+            ).exists()
+        )
+
+    def test_staff_cannot_delete_evaluated_ticket_via_generic(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.delete(
+            f"/api/generic/tickets/{self.ticket.id}/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_409_CONFLICT
+        )
+
+        self.assertTrue(
+            SupportTicket.objects.filter(
+                id=self.ticket.id
+            ).exists()
+        )
+
+    def test_staff_cannot_delete_evaluated_ticket_via_viewset(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_authenticate(user=self.staff_user)
+
+        response = self.client.delete(
+            f"/api/viewset/tickets/{self.ticket.id}/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_409_CONFLICT
+        )
+
+        self.assertTrue(
+            SupportTicket.objects.filter(
+                id=self.ticket.id
+            ).exists()
+        )
+
     def test_authenticated_user_can_patch_ticket(self):
 
         self.client.force_authenticate(user=self.user)
@@ -753,6 +845,46 @@ class WebPermissionTests(TestCase):
         self.assertEqual(
             self.ticket.message,
             "Updated message after triage"
+        )
+
+    def test_staff_cannot_delete_evaluated_ticket_via_web(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_login(self.staff_user)
+
+        response = self.client.post(
+            reverse("ticket_delete", args=[self.ticket.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertContains(
+            response,
+            "此案件已有評估紀錄，無法刪除。"
+        )
+
+        self.assertTrue(
+            SupportTicket.objects.filter(
+                id=self.ticket.id
+            ).exists()
+        )
+
+    def test_staff_can_delete_unevaluated_ticket_via_web(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.post(
+            reverse("ticket_delete", args=[self.ticket.id])
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        self.assertFalse(
+            SupportTicket.objects.filter(
+                id=self.ticket.id
+            ).exists()
         )
 
 class TicketTriageWorkflowTests(TestCase):
@@ -1681,6 +1813,24 @@ class TicketTriageWorkflowTests(TestCase):
 
         self.assertEqual(metrics["total_decisions"], 1)
         self.assertEqual(metrics["human_review_count"], 0)
+
+    def test_submit_human_review_rejects_blank_reason(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        review_record, review_error = submit_human_review(
+            decision,
+            "review_requested_action",
+            "   ",
+        )
+
+        self.assertIsNone(review_record)
+        self.assertEqual(
+            review_error,
+            "human review reason is required",
+        )
 
     def test_submit_human_review_creates_record_and_blocks_duplicate(self):
         decision, error = run_triage(

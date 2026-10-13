@@ -40,6 +40,9 @@
                 <p>
                     刪除後，此客服案件將無法復原。
                 </p>
+                {% if error_message %}
+                    {{ error_message }}
+                {% endif %}
             </div>
 
             <div class="delete-ticket-info">
