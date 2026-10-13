@@ -1,4 +1,4 @@
-from django.db.models import Q
+from .triage_service import get_risk_gate_result
 from .models import(
     TicketTriageDecision,
     TriageExecutionRecord,
@@ -7,9 +7,13 @@ from .models import(
 def calculate_triage_metrics():
     total_decisions = TicketTriageDecision.objects.count()
 
-    human_review_count = TicketTriageDecision.objects.filter(
-        Q(requires_human=True) | Q(priority_level="high")
-    ).count()
+    human_review_count = 0
+
+    for decision in TicketTriageDecision.objects.all():
+        route, _ = get_risk_gate_result(decision)
+
+        if route == "human_review":
+            human_review_count += 1
 
     auto_handled_count = (
         TicketTriageDecision.objects

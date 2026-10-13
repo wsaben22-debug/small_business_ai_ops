@@ -1660,6 +1660,28 @@ class TicketTriageWorkflowTests(TestCase):
         self.assertEqual(metrics["human_review_rate"], 66.67)
         self.assertEqual(metrics["auto_handled_rate"], 33.33)
 
+    def test_triage_metrics_uses_persisted_risk_gate_result(self):
+        decision, error = run_triage(
+            self.ticket,
+            "manual",
+        )
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(decision)
+        self.assertTrue(decision.requires_human)
+
+        TriageRiskGateRecord.objects.create(
+            decision=decision,
+            route="auto_handle",
+            reason="persisted route precedence test",
+            gate_version="risk_gate_v1",
+        )
+
+        metrics = calculate_triage_metrics()
+
+        self.assertEqual(metrics["total_decisions"], 1)
+        self.assertEqual(metrics["human_review_count"], 0)
+
     def test_submit_human_review_creates_record_and_blocks_duplicate(self):
         decision, error = run_triage(
             self.ticket,
