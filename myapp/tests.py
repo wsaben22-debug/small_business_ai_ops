@@ -1,3 +1,4 @@
+from django.apps import apps
 from rest_framework.test import APITestCase
 from rest_framework import status
 from django.contrib.auth.models import User
@@ -36,6 +37,7 @@ from .triage_service import (
 from .evaluation_service import calculate_triage_metrics
 from django.urls import reverse
 from .dashboard_service import get_high_risk_queue
+import json
 
 class SupportTicketPermissionTests(APITestCase):
 
@@ -1903,4 +1905,212 @@ class TicketTriageWorkflowTests(TestCase):
         self.assertEqual(
             review_error,
             "ticket status=closed is not eligible for human review",
+        )
+
+class TicketAIAssistRecordTests(TestCase):
+
+    def test_ai_assist_record_saves_pending_snapshot(self):
+
+        record_model = apps.get_model(
+            "myapp",
+            "TicketAIAssistRecord",
+        )
+
+        user = User.objects.create_user(
+            username="ai_reviewer",
+            password="Test1234!",
+        )
+
+        customer = Customer.objects.create(
+            name="AI 測試客戶",
+            phone="0912345678",
+            email="ai-record@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="AI-TEST-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品有問題，希望退款。",
+            status="open",
+        )
+
+        decision, error = run_triage(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(decision)
+
+        snapshot = {
+            "message": ticket.message,
+            "category": decision.category_snapshot,
+            "requested_action": decision.requested_action_snapshot,
+        }
+
+        record = record_model.objects.create(
+            decision=decision,
+            requested_by=user,
+            input_snapshot=snapshot,
+            model_name="gemini-2.5-flash",
+            prompt_version="v1",
+        )
+
+        record.refresh_from_db()
+
+        self.assertEqual(record.status, "pending")
+        self.assertEqual(record.input_snapshot, snapshot)
+        self.assertIsNone(record.output_data)
+
+        self.assertEqual(record.decision, decision)
+        self.assertEqual(record.requested_by, user)
+
+        self.assertTrue(
+            decision.ai_assist_records.filter(
+                pk=record.pk
+            ).exists()
+        )
+
+        record.status = "success"
+
+        with self.assertRaises(ValidationError):
+            record.full_clean()
+
+class AIInputSnapshotTests(TestCase):
+
+    def test_high_risk_snapshot_is_json_safe_and_excludes_pii(self):
+
+        from .ai_service import build_ai_input_snapshot
+
+        customer = Customer.objects.create(
+            name="AI 測試客戶",
+            phone="0912345678",
+            email="ai-snapshot@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="AI 測試配送地址",
+            status="paid",
+            order_number="AI-SNAPSHOT-001",
+        )
+
+        product = Product.objects.create(
+            name="測試商品",
+            stock=10,
+            price="3500.00",
+            product_code="AI-SNAPSHOT-P01",
+        )
+
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            quantity=1,
+            unit_price="3500.00",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品有瑕疵，希望申請退款。",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "human_review")
+
+        snapshot, error = build_ai_input_snapshot(decision)
+
+        self.assertIsNone(error)
+
+        self.assertEqual(
+            snapshot["ticket_message"],
+            ticket.message,
+        )
+
+        self.assertEqual(snapshot["category"], "refund")
+        self.assertEqual(snapshot["requested_action"], "refund")
+        self.assertEqual(snapshot["order_total"], "3500.00")
+        self.assertEqual(snapshot["risk_gate_route"], "human_review")
+
+        self.assertTrue({
+            "severity_level",
+            "impact_level",
+            "urgency_level",
+            "priority_level",
+            "prior_ticket_count",
+        }.issubset(snapshot))
+
+        payload = json.dumps(
+            snapshot,
+            ensure_ascii=False,
+        )
+
+        for sensitive_value in (
+            customer.name,
+            customer.phone,
+            customer.email,
+            order.shipping_address,
+        ):
+            self.assertNotIn(sensitive_value, payload)
+
+    def test_auto_handle_decision_cannot_build_ai_snapshot(self):
+
+        from .ai_service import build_ai_input_snapshot
+
+        customer = Customer.objects.create(
+            name="低風險測試客戶",
+            phone="0912345678",
+            email="ai-low-risk@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="AI-LOW-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="other",
+            requested_action="info",
+            message="請問訂單目前的處理進度？",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "auto_handle")
+
+        snapshot, snapshot_error = build_ai_input_snapshot(
+            decision
+        )
+
+        self.assertIsNone(snapshot)
+
+        self.assertEqual(
+            snapshot_error,
+            "decision is not routed to human review",
         )

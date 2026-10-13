@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.core.exceptions import ValidationError
+from django.conf import settings
 
 class Customer(models.Model):
     name = models.CharField(max_length=100)
@@ -274,3 +275,70 @@ class TriageRiskGateRecord(models.Model):
     created_at = models.DateTimeField(
         auto_now_add=True,
     )
+
+class TicketAIAssistRecord(models.Model):
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("success", "Success"),
+        ("failed", "Failed"),
+    ]
+
+    decision = models.ForeignKey(
+        TicketTriageDecision,
+        on_delete=models.PROTECT,
+        related_name="ai_assist_records",
+    )
+
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="ai_assist_requests",
+    )
+
+    input_snapshot = models.JSONField()
+
+    output_data = models.JSONField(
+        null=True,
+        blank=True,
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending",
+    )
+
+    error_code = models.CharField(
+        max_length=50,
+        blank=True,
+    )
+
+    error_message = models.TextField(
+        blank=True,
+    )
+
+    model_name = models.CharField(
+        max_length=100,
+    )
+
+    prompt_version = models.CharField(
+        max_length=30,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    def clean(self):
+        super().clean()
+
+        if self.status == "success" and not self.output_data:
+            raise ValidationError({
+                "output_data": "Successful AI assist requires output data."
+            })
