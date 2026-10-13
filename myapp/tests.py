@@ -76,6 +76,73 @@ class SupportTicketPermissionTests(APITestCase):
         response = self.client.get('/api/viewset/tickets/')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_evaluated_ticket_cannot_patch_order(self):
+        other_order = Order.objects.create(
+            customer=self.customer,
+            shipping_address='另一個測試地址',
+            status='pending',
+            order_number='TEST-002',
+        )
+
+        decision, err = run_triage(
+            self.ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.patch(
+            f'/api/viewset/tickets/{self.ticket.id}/',
+            {
+                'order': other_order.id,
+            },
+            format='json'
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(
+            self.ticket.order,
+            self.order
+        )
+
+    def test_ticket_customer_must_match_order_customer(self):
+        other_customer = Customer.objects.create(
+            name='另一位測試客戶',
+            phone='0987654321',
+            email='other@example.com',
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.patch(
+            f'/api/viewset/tickets/{self.ticket.id}/',
+            {
+                'customer': other_customer.id,
+            },
+            format='json'
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(
+            self.ticket.customer,
+            self.customer
+        )
+
     def test_anonymous_cannot_create_ticket(self):
 
         response = self.client.post(
@@ -234,6 +301,68 @@ class SupportTicketPermissionTests(APITestCase):
             'in_progress'
         )
 
+    def test_evaluated_ticket_cannot_patch_category(self):
+        decision, err = run_triage(
+            self.ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.patch(
+            f'/api/viewset/tickets/{self.ticket.id}/',
+            {
+                'category': 'refund',
+            },
+            format='json'
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(
+            self.ticket.category,
+            'other'
+        )
+
+    def test_evaluated_ticket_cannot_patch_requested_action(self):
+        decision, err = run_triage(
+            self.ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.patch(
+            f'/api/viewset/tickets/{self.ticket.id}/',
+            {
+                'requested_action': 'refund',
+            },
+            format='json'
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST
+        )
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(
+            self.ticket.requested_action,
+            'other'
+        )
+
     def test_authenticated_user_can_put_ticket(self):
 
         self.client.force_authenticate(user=self.user)
@@ -267,6 +396,41 @@ class SupportTicketPermissionTests(APITestCase):
         self.assertEqual(
             self.ticket.status,
             'in_progress'
+        )
+
+    def test_evaluated_ticket_can_put_unchanged_protected_fields(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_authenticate(user=self.user)
+
+        url = f"/api/viewset/tickets/{self.ticket.id}/"
+
+        data = {
+            "customer": self.customer.id,
+            "order": self.order.id,
+            "category": self.ticket.category,
+            "requested_action": self.ticket.requested_action,
+            "message": "PUT 已評估案件更新測試",
+            "status": "in_progress",
+        }
+
+        response = self.client.put(url, data, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(self.ticket.message, "PUT 已評估案件更新測試")
+        self.assertEqual(self.ticket.status, "in_progress")
+
+        self.assertEqual(self.ticket.order_id, self.order.id)
+        self.assertEqual(self.ticket.category, data["category"])
+        self.assertEqual(
+            self.ticket.requested_action,
+            data["requested_action"]
         )
 
     def test_anonymous_user_cannot_put_ticket(self):
@@ -447,6 +611,148 @@ class WebPermissionTests(TestCase):
         self.assertContains(
             list_response,
             delete_url,
+        )
+
+    def test_evaluated_ticket_cannot_edit_category_via_web(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_login(self.normal_user)
+
+        response = self.client.post(
+            reverse("ticket_edit", args=[self.ticket.id]),
+            {
+                "order": self.order.id,
+                "customer": self.customer.id,
+                "category": "refund",
+                "requested_action": self.ticket.requested_action,
+                "status": self.ticket.status,
+                "message": self.ticket.message,
+            }
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("category", response.context["form"].errors)
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.category, "other")
+
+    def test_evaluated_ticket_cannot_edit_requested_action_via_web(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_login(self.normal_user)
+
+        response = self.client.post(
+            reverse("ticket_edit", args=[self.ticket.id]),
+            {
+                "order": self.order.id,
+                "customer": self.customer.id,
+                "category": self.ticket.category,
+                "requested_action": "refund",
+                "status": self.ticket.status,
+                "message": self.ticket.message,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("requested_action", response.context["form"].errors)
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.requested_action, "other")
+
+    def test_evaluated_ticket_cannot_edit_order_via_web(self):
+        other_order = Order.objects.create(
+            customer=self.customer,
+            shipping_address="Web 測試地址 B",
+            status="paid",
+            order_number="WEB-ORDER-ALT-001",
+        )
+
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_login(self.normal_user)
+
+        response = self.client.post(
+            reverse("ticket_edit", args=[self.ticket.id]),
+            {
+                "order": other_order.id,
+                "customer": self.customer.id,
+                "category": self.ticket.category,
+                "requested_action": self.ticket.requested_action,
+                "status": self.ticket.status,
+                "message": self.ticket.message,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("order", response.context["form"].errors)
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.order, self.order)
+
+    def test_ticket_customer_must_match_order_customer_via_web(self):
+        other_customer = Customer.objects.create(
+            name="Web 測試客戶 B",
+            phone="0999999999",
+            email="web-consistency-b@example.com",
+        )
+
+        self.client.force_login(self.normal_user)
+
+        response = self.client.post(
+            reverse("ticket_edit", args=[self.ticket.id]),
+            {
+                "order": self.order.id,
+                "customer": other_customer.id,
+                "category": self.ticket.category,
+                "requested_action": self.ticket.requested_action,
+                "status": self.ticket.status,
+                "message": self.ticket.message,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("customer", response.context["form"].errors)
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.customer, self.customer)
+
+    def test_evaluated_ticket_can_edit_message_and_status_via_web(self):
+        decision, err = run_triage(self.ticket, "manual")
+
+        self.assertIsNotNone(decision)
+        self.assertIsNone(err)
+
+        self.client.force_login(self.normal_user)
+
+        response = self.client.post(
+            reverse("ticket_edit", args=[self.ticket.id]),
+            {
+                "order": self.order.id,
+                "customer": self.customer.id,
+                "category": self.ticket.category,
+                "requested_action": self.ticket.requested_action,
+                "status": "in_progress",
+                "message": "Updated message after triage",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+        self.ticket.refresh_from_db()
+
+        self.assertEqual(self.ticket.status, "in_progress")
+        self.assertEqual(
+            self.ticket.message,
+            "Updated message after triage"
         )
 
 class TicketTriageWorkflowTests(TestCase):
