@@ -38,6 +38,8 @@ from .evaluation_service import calculate_triage_metrics
 from django.urls import reverse
 from .dashboard_service import get_high_risk_queue
 import json
+from pydantic import ValidationError as PydanticValidationError
+from unittest.mock import patch
 
 class SupportTicketPermissionTests(APITestCase):
 
@@ -2114,3 +2116,468 @@ class AIInputSnapshotTests(TestCase):
             snapshot_error,
             "decision is not routed to human review",
         )
+
+class AIAssistOutputTests(TestCase):
+
+    def test_ai_output_requires_correct_structure(self):
+
+        from .ai_service import AIAssistOutput
+
+        valid_output = {
+            "summary": "客戶反映商品損壞。",
+            "risk_notes": [
+                "需要人工確認退款條件"
+            ],
+            "reply_draft": "您好，我們已收到您的問題。",
+        }
+
+        result = AIAssistOutput.model_validate(
+            valid_output
+        )
+
+        self.assertEqual(
+            result.model_dump(),
+            valid_output,
+        )
+
+        invalid_output = {
+            "summary": "客戶要求退款",
+            "risk_notes": "需要人工確認",
+            "reply_draft": "您好，我們已收到您的問題。",
+        }
+
+        with self.assertRaises(PydanticValidationError):
+            AIAssistOutput.model_validate(
+                invalid_output
+            )
+
+class GeminiServiceTests(TestCase):
+
+    def test_generate_ai_assist_returns_valid_output(self):
+
+        from .ai_service import generate_ai_assist
+
+        snapshot = {
+            "ticket_message": "商品損壞，希望退款。",
+            "risk_gate_route": "human_review",
+        }
+
+        expected_output = {
+            "summary": "客戶反映商品損壞。",
+            "risk_notes": ["退款需要人工審核"],
+            "reply_draft": "您好，我們已收到您的問題。",
+        }
+
+        with patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "fake-test-key"},
+        ):
+            with patch("google.genai.Client") as mock_client:
+
+                mock_response = (
+                    mock_client.return_value
+                    .models.generate_content.return_value
+                )
+
+                mock_response.text = json.dumps(
+                    expected_output,
+                    ensure_ascii=False,
+                )
+
+                result, error = generate_ai_assist(snapshot)
+
+                self.assertIsNone(error)
+                self.assertEqual(result, expected_output)
+
+                mock_client.return_value.models.generate_content.assert_called_once()
+                mock_client.return_value.close.assert_called_once()
+
+    def test_generate_ai_assist_handles_api_failure(self):
+
+        from .ai_service import generate_ai_assist
+
+        snapshot = {
+            "ticket_message": "商品損壞，希望退款。",
+            "risk_gate_route": "human_review",
+        }
+
+        with patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "fake-test-key"},
+        ):
+            with patch("myapp.ai_service.genai.Client") as mock_client:
+
+                mock_client.return_value.models.generate_content.side_effect = (
+                    RuntimeError("simulated API failure")
+                )
+
+                result, error = generate_ai_assist(snapshot)
+
+                self.assertIsNone(result)
+                self.assertEqual(
+                    error,
+                    "GEMINI_REQUEST_FAILED",
+                )
+
+                mock_client.return_value.close.assert_called_once()
+
+    def test_generate_ai_assist_rejects_invalid_output(self):
+
+        from .ai_service import generate_ai_assist
+
+        snapshot = {
+            "ticket_message": "商品損壞，希望退款。",
+            "risk_gate_route": "human_review",
+        }
+
+        with patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "fake-test-key"},
+        ):
+            with patch("myapp.ai_service.genai.Client") as mock_client:
+
+                mock_response = (
+                    mock_client.return_value
+                    .models.generate_content.return_value
+                )
+
+                mock_response.text = json.dumps({
+                    "summary": "客戶要求退款",
+                    "risk_notes": "需要人工審核",
+                    "reply_draft": "您好，我們已收到您的問題。",
+                })
+
+                result, error = generate_ai_assist(snapshot)
+
+                self.assertIsNone(result)
+
+                self.assertEqual(
+                    error,
+                    "GEMINI_REQUEST_FAILED",
+                )
+
+                mock_client.return_value.close.assert_called_once()
+
+    def test_generate_ai_assist_handles_client_init_failure(self):
+
+            from .ai_service import generate_ai_assist
+
+            snapshot = {
+                "ticket_message": "商品損壞，希望退款。",
+                "risk_gate_route": "human_review",
+            }
+
+            with patch.dict(
+                "os.environ",
+                {"GEMINI_API_KEY": "fake-test-key"},
+            ):
+                with patch(
+                    "myapp.ai_service.genai.Client",
+                    side_effect=RuntimeError(
+                        "simulated client initialization failure"
+                    ),
+                ):
+
+                    result, error = generate_ai_assist(snapshot)
+
+            self.assertIsNone(result)
+
+            self.assertEqual(
+                error,
+                "GEMINI_REQUEST_FAILED",
+            )
+
+class AIAssistWorkflowTests(TestCase):
+
+    def test_successful_ai_assist_saves_record(self):
+
+        from .ai_service import run_ai_assist
+
+        user = User.objects.create_user(
+            username="ai_workflow_user",
+            password="Test1234!",
+        )
+
+        customer = Customer.objects.create(
+            name="AI Workflow 測試客戶",
+            phone="0912345678",
+            email="ai-workflow@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="AI-WORKFLOW-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品損壞，希望退款。",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertEqual(route, "human_review")
+
+        expected_output = {
+            "summary": "客戶反映商品損壞。",
+            "risk_notes": ["退款需要人工審核"],
+            "reply_draft": "您好，我們已收到您的問題。",
+        }
+
+        with patch(
+            "myapp.ai_service.generate_ai_assist",
+            return_value=(expected_output, None),
+        ) as mock_generate:
+
+            record, error = run_ai_assist(
+                decision,
+                user,
+            )
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(record)
+
+        record.refresh_from_db()
+
+        self.assertEqual(record.status, "success")
+        self.assertEqual(record.output_data, expected_output)
+        self.assertEqual(record.decision, decision)
+        self.assertEqual(record.requested_by, user)
+
+        self.assertEqual(
+            record.input_snapshot["risk_gate_route"],
+            "human_review",
+        )
+
+        mock_generate.assert_called_once()
+
+    def test_failed_ai_assist_saves_failed_record(self):
+
+        from .ai_service import run_ai_assist
+
+        user = User.objects.create_user(
+            username="ai_failure_user",
+            password="Test1234!",
+        )
+
+        customer = Customer.objects.create(
+            name="AI 失敗測試客戶",
+            phone="0912345678",
+            email="ai-failure@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="AI-FAIL-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品損壞，希望退款。",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "human_review")
+
+        with patch(
+            "myapp.ai_service.generate_ai_assist",
+            return_value=(None, "GEMINI_REQUEST_FAILED"),
+        ) as mock_generate:
+
+            record, error = run_ai_assist(
+                decision,
+                user,
+            )
+
+        self.assertIsNotNone(record)
+
+        self.assertEqual(
+            error,
+            "GEMINI_REQUEST_FAILED",
+        )
+
+        record.refresh_from_db()
+
+        self.assertEqual(record.status, "failed")
+        self.assertIsNone(record.output_data)
+
+        self.assertEqual(
+            record.error_code,
+            "GEMINI_REQUEST_FAILED",
+        )
+
+        self.assertIsNotNone(record.completed_at)
+
+        self.assertEqual(record.decision, decision)
+        self.assertEqual(record.requested_by, user)
+
+        self.assertEqual(
+            decision.ai_assist_records.count(),
+            1,
+        )
+
+        mock_generate.assert_called_once()
+
+    def test_closed_ticket_cannot_run_ai_assist(self):
+
+        from .ai_service import run_ai_assist
+
+        user = User.objects.create_user(
+            username="ai_closed_user",
+            password="Test1234!",
+        )
+
+        customer = Customer.objects.create(
+            name="已關閉案件測試客戶",
+            phone="0912345678",
+            email="ai-closed@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="AI-CLOSED-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品損壞，希望退款。",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "human_review")
+
+        ticket.status = "closed"
+        ticket.save(update_fields=["status"])
+
+        with patch(
+            "myapp.ai_service.generate_ai_assist"
+        ) as mock_generate:
+
+            record, error = run_ai_assist(
+                decision,
+                user,
+            )
+
+        self.assertIsNone(record)
+        self.assertEqual(
+            error,
+            "AI_ASSIST_TICKET_NOT_ELIGIBLE",
+        )
+
+        self.assertEqual(
+            decision.ai_assist_records.count(),
+            0,
+        )
+
+        mock_generate.assert_not_called()
+
+    def test_reviewed_ticket_cannot_run_ai_assist(self):
+
+        from .ai_service import run_ai_assist
+
+        user = User.objects.create_user(
+            username="ai_reviewed_user",
+            password="Test1234!",
+        )
+
+        customer = Customer.objects.create(
+            name="已審核測試客戶",
+            phone="0912345678",
+            email="ai-reviewed@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="AI-REVIEWED-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品損壞，希望退款。",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "human_review")
+
+        review_record, review_error = submit_human_review(
+            decision,
+            "review_requested_action",
+            "已完成案件人工審核",
+        )
+
+        self.assertIsNone(review_error)
+        self.assertIsNotNone(review_record)
+
+        with patch(
+            "myapp.ai_service.generate_ai_assist",
+            return_value=(
+                {
+                    "summary": "測試摘要",
+                    "risk_notes": ["測試注意事項"],
+                    "reply_draft": "測試回覆",
+                },
+                None,
+            ),
+        ) as mock_generate:
+
+            record, error = run_ai_assist(
+                decision,
+                user,
+            )
+
+        self.assertIsNone(record)
+
+        self.assertEqual(
+            error,
+            "AI_ASSIST_ALREADY_REVIEWED",
+        )
+
+        self.assertEqual(
+            decision.ai_assist_records.count(),
+            0,
+        )
+
+        mock_generate.assert_not_called()
+
