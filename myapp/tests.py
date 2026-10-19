@@ -2025,7 +2025,10 @@ class AIInputSnapshotTests(TestCase):
             order=order,
             category="refund",
             requested_action="refund",
-            message="商品有瑕疵，希望申請退款。",
+            message=(
+                "商品有瑕疵，希望申請退款。"
+                "請聯絡 0912345678 或 ai-snapshot@example.com。"
+            ),
             status="open",
         )
 
@@ -2041,9 +2044,19 @@ class AIInputSnapshotTests(TestCase):
 
         self.assertIsNone(error)
 
-        self.assertEqual(
+        self.assertIn(
+            "商品有瑕疵，希望申請退款。",
             snapshot["ticket_message"],
-            ticket.message,
+        )
+
+        self.assertNotIn(
+            customer.phone,
+            snapshot["ticket_message"],
+        )
+
+        self.assertNotIn(
+            customer.email,
+            snapshot["ticket_message"],
         )
 
         self.assertEqual(snapshot["category"], "refund")
@@ -2191,6 +2204,22 @@ class GeminiServiceTests(TestCase):
 
                 mock_client.return_value.models.generate_content.assert_called_once()
                 mock_client.return_value.close.assert_called_once()
+
+                http_options = mock_client.call_args.kwargs.get(
+                    "http_options"
+                )
+
+                self.assertIsNotNone(http_options)
+
+                self.assertEqual(
+                    http_options.timeout,
+                    60000,
+                )
+
+                self.assertEqual(
+                    http_options.retry_options.attempts,
+                    1,
+                )
 
     def test_generate_ai_assist_handles_api_failure(self):
 
@@ -2581,3 +2610,272 @@ class AIAssistWorkflowTests(TestCase):
 
         mock_generate.assert_not_called()
 
+    def test_same_successful_snapshot_reuses_ai_record(self):
+
+        from .ai_service import run_ai_assist
+
+        user = User.objects.create_user(
+            username="ai_reuse_user",
+            password="Test1234!",
+        )
+
+        customer = Customer.objects.create(
+            name="重複分析測試客戶",
+            phone="0912345678",
+            email="ai-reuse@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="AI-REUSE-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品損壞，希望退款。",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "human_review")
+
+        expected_output = {
+            "summary": "客戶反映商品損壞。",
+            "risk_notes": ["退款需要人工審核"],
+            "reply_draft": "您好，我們已收到您的問題。",
+        }
+
+        with patch(
+            "myapp.ai_service.generate_ai_assist",
+            return_value=(expected_output, None),
+        ) as mock_generate:
+
+            first_record, first_error = run_ai_assist(
+                decision,
+                user,
+            )
+
+            second_record, second_error = run_ai_assist(
+                decision,
+                user,
+            )
+
+        self.assertIsNone(first_error)
+        self.assertIsNone(second_error)
+
+        self.assertIsNotNone(first_record)
+        self.assertIsNotNone(second_record)
+
+        self.assertEqual(
+            first_record.pk,
+            second_record.pk,
+        )
+
+        self.assertEqual(
+            decision.ai_assist_records.count(),
+            1,
+        )
+
+        mock_generate.assert_called_once()
+
+    def test_pending_ai_assist_blocks_duplicate_request(self):
+
+        from .ai_service import (
+            run_ai_assist,
+            build_ai_input_snapshot,
+        )
+
+        user = User.objects.create_user(
+            username="ai_pending_user",
+            password="Test1234!",
+        )
+
+        customer = Customer.objects.create(
+            name="Pending 測試客戶",
+            phone="0912345678",
+            email="ai-pending@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="AI-PENDING-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品損壞，希望退款。",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "human_review")
+
+        snapshot, snapshot_error = build_ai_input_snapshot(
+            decision
+        )
+
+        self.assertIsNone(snapshot_error)
+
+        pending_record = decision.ai_assist_records.create(
+            requested_by=user,
+            input_snapshot=snapshot,
+            model_name="gemini-3.8-flash",
+            prompt_version="v1",
+        )
+
+        self.assertEqual(pending_record.status, "pending")
+
+        from django.db import IntegrityError, transaction
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                decision.ai_assist_records.create(
+                    requested_by=user,
+                    input_snapshot=snapshot,
+                    model_name="gemini-3.8-flash",
+                    prompt_version="v1",
+                )
+
+        expected_output = {
+            "summary": "測試摘要",
+            "risk_notes": ["需要人工審核"],
+            "reply_draft": "您好，我們已收到您的問題。",
+        }
+
+        with patch(
+            "myapp.ai_service.generate_ai_assist",
+            return_value=(expected_output, None),
+        ) as mock_generate:
+
+            record, error = run_ai_assist(
+                decision,
+                user,
+            )
+
+        self.assertIsNone(record)
+
+        self.assertEqual(
+            error,
+            "AI_ASSIST_ALREADY_RUNNING",
+        )
+
+        self.assertEqual(
+            decision.ai_assist_records.count(),
+            1,
+        )
+
+        mock_generate.assert_not_called()
+
+        with patch(
+            "django.db.models.query.QuerySet.exists",
+            return_value=False,
+        ):
+            with patch(
+                "myapp.ai_service.generate_ai_assist"
+            ) as mock_race:
+
+                race_record, race_error = run_ai_assist(
+                    decision,
+                    user,
+                )
+
+        self.assertIsNone(race_record)
+
+        self.assertEqual(
+            race_error,
+            "AI_ASSIST_ALREADY_RUNNING",
+        )
+
+        self.assertEqual(
+            decision.ai_assist_records.count(),
+            1,
+        )
+
+        mock_race.assert_not_called()
+
+        original_message = decision.ticket.message
+
+        decision.ticket.message = "商品仍有問題，補充退款說明。"
+        decision.ticket.save(update_fields=["message"])
+
+        with patch(
+            "myapp.ai_service.generate_ai_assist"
+        ) as mock_generate:
+
+            changed_record, changed_error = run_ai_assist(
+                decision,
+                user,
+            )
+
+        self.assertIsNone(changed_record)
+        self.assertEqual(
+            changed_error,
+            "AI_ASSIST_ALREADY_RUNNING",
+        )
+
+        mock_generate.assert_not_called()
+
+        decision.ticket.message = original_message
+        decision.ticket.save(update_fields=["message"])
+
+        from datetime import timedelta
+        from django.utils import timezone
+
+        stale_time = timezone.now() - timedelta(minutes=10)
+
+        decision.ai_assist_records.filter(
+            pk=pending_record.pk,
+        ).update(created_at=stale_time)
+
+        with patch(
+            "myapp.ai_service.generate_ai_assist",
+            return_value=(expected_output, None),
+        ) as mock_retry:
+
+            new_record, retry_error = run_ai_assist(
+                decision,
+                user,
+            )
+
+        self.assertIsNone(retry_error)
+        self.assertIsNotNone(new_record)
+
+        self.assertEqual(new_record.status, "success")
+
+        pending_record.refresh_from_db()
+
+        self.assertEqual(pending_record.status, "failed")
+
+        self.assertEqual(
+            pending_record.error_code,
+            "AI_ASSIST_STALE_PENDING",
+        )
+
+        self.assertIsNotNone(pending_record.completed_at)
+
+        self.assertEqual(
+            decision.ai_assist_records.count(),
+            2,
+        )
+
+        mock_retry.assert_called_once()

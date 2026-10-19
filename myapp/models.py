@@ -342,3 +342,12 @@ class TicketAIAssistRecord(models.Model):
             raise ValidationError({
                 "output_data": "Successful AI assist requires output data."
             })
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["decision"],
+                condition=models.Q(status="pending"),
+                name="uniq_ai_pending_decision",
+            ),
+        ]

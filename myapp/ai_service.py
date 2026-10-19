@@ -1,13 +1,16 @@
 import json
 import os
+import re
 
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+from datetime import timedelta
 from django.utils import timezone
 from .models import TicketAIAssistRecord
 
+from django.db import IntegrityError, transaction
 from .triage_service import build_high_risk_support_package
 
 class AIAssistOutput(BaseModel):
@@ -17,6 +20,24 @@ class AIAssistOutput(BaseModel):
     risk_notes: list[str]
 
     reply_draft: str
+
+def sanitize_ticket_message(message):
+
+    # 遮蔽 Email
+    message = re.sub(
+        r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+        "[EMAIL_REDACTED]",
+        message,
+    )
+
+    # 遮蔽常見台灣手機號碼格式
+    message = re.sub(
+        r"(?<!\d)09\d{2}[-\s]?\d{3}[-\s]?\d{3}(?!\d)",
+        "[PHONE_REDACTED]",
+        message,
+    )
+
+    return message
 
 def build_ai_input_snapshot(decision):
 
@@ -30,7 +51,7 @@ def build_ai_input_snapshot(decision):
     ticket = decision.ticket
 
     snapshot = {
-        "ticket_message": ticket.message,
+        "ticket_message": sanitize_ticket_message(ticket.message),
 
         "category": package["category"],
         "requested_action": package["requested_action"],
@@ -64,7 +85,15 @@ def generate_ai_assist(snapshot):
     client = None
 
     try:
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(
+                timeout=60000,
+                retry_options=types.HttpRetryOptions(
+                    attempts=1,
+                )
+            )
+        )
 
         response = client.models.generate_content(
             model="gemini-3.8-flash",
@@ -112,13 +141,62 @@ def run_ai_assist(decision, user):
     if error is not None:
         return None, error
 
-    record = TicketAIAssistRecord.objects.create(
-        decision=decision,
-        requested_by=user,
-        input_snapshot=snapshot,
-        model_name="gemini-3.8-flash",
-        prompt_version="v1",
+    existing_record = (
+        TicketAIAssistRecord.objects.filter(
+            decision=decision,
+            status="success",
+            input_snapshot=snapshot,
+            model_name="gemini-3.8-flash",
+            prompt_version="v1",
+        )
+        .order_by("-created_at")
+        .first()
     )
+
+    if existing_record is not None:
+        return existing_record, None
+
+    now = timezone.now()
+    stale_cutoff = now - timedelta(minutes=5)
+
+    TicketAIAssistRecord.objects.filter(
+        decision=decision,
+        status="pending",
+        created_at__lt=stale_cutoff,
+    ).update(
+        status="failed",
+        error_code="AI_ASSIST_STALE_PENDING",
+        completed_at=now,
+    )
+
+    pending_exists = TicketAIAssistRecord.objects.filter(
+        decision=decision,
+        status="pending",
+    ).exists()
+
+    if pending_exists:
+        return None, "AI_ASSIST_ALREADY_RUNNING"
+
+    try:
+        with transaction.atomic():
+            record = TicketAIAssistRecord.objects.create(
+                decision=decision,
+                requested_by=user,
+                input_snapshot=snapshot,
+                model_name="gemini-3.8-flash",
+                prompt_version="v1",
+            )
+
+    except IntegrityError:
+        pending_record = TicketAIAssistRecord.objects.filter(
+            decision=decision,
+            status="pending",
+        ).first()
+
+        if pending_record is not None:
+            return None, "AI_ASSIST_ALREADY_RUNNING"
+
+        raise
 
     result, error = generate_ai_assist(snapshot)
 
