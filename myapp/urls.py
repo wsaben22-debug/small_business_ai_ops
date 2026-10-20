@@ -44,6 +44,12 @@ urlpatterns = [
         views.high_risk_review,
         name="high_risk_review",
     ),
+
+    path(
+      "high-risk-review/<int:ticket_id>/ai-assist/",
+      views.run_ticket_ai_assist,
+      name="run_ticket_ai_assist",
+    ),
 ]
 
 urlpatterns += router.urls

@@ -32,6 +32,16 @@
             </a>
         </header>
 
+        {% if messages %}
+            <section class="review-section">
+                {% for message in messages %}
+                    <p class="{% if message.tags == 'error' %}review-error{% else %}review-note{% endif %}">
+                        {{ message }}
+                    </p>
+                {% endfor %}
+            </section>
+        {% endif %}
+
         {% if error %}
 
             <section class="review-section">
@@ -359,6 +369,82 @@
                     </ul>
                 </div>
             </section>
+
+            <!-- AI Assist -->
+            {% if package.route == "human_review" %}
+                <section class="review-section">
+                    <h2>AI 輔助分析</h2>
+
+                    <p class="review-note">
+                        AI 將根據案件與風險評估資料，
+                        產生摘要、處理注意事項及客服回覆草稿。
+                        最終決策仍由人工負責。
+                    </p>
+
+                    {% if not review_completed %}
+                        {% if ticket.status == "open" or ticket.status == "in_progress" %}
+                            <form
+                                method="post"
+                                action="{% url 'run_ticket_ai_assist' ticket.id %}"
+                            >
+                                {% csrf_token %}
+
+                                <button
+                                    type="submit"
+                                    class="action-button"
+                                >
+                                    執行 AI 輔助分析
+                                </button>
+                            </form>
+                        {% else %}
+                            <p class="review-note">
+                                案件已結束，僅可查看歷史 AI 分析。
+                            </p>
+                        {% endif %}
+                    {% else %}
+                        <p class="review-note">
+                            此案件已完成人工審核，無須重新執行 AI 分析。
+                        </p>
+                    {% endif %}
+
+                    {% if latest_ai_record %}
+                        <div class="detail-card">
+                            <h3>最近一次 AI 分析</h3>
+
+                            {% if latest_ai_record.status == "success" %}
+                                <h3>案件摘要</h3>
+                                <p>
+                                    {{ latest_ai_record.output_data.summary }}
+                                </p>
+
+                                <h3>處理注意事項</h3>
+                                <ul>
+                                    {% for note in latest_ai_record.output_data.risk_notes %}
+                                        <li>{{ note }}</li>
+                                    {% empty %}
+                                        <li>無額外注意事項</li>
+                                    {% endfor %}
+                                </ul>
+
+                                <h3>客服回覆草稿</h3>
+                                <p>
+                                    {{ latest_ai_record.output_data.reply_draft|linebreaksbr }}
+                                </p>
+
+                            {% elif latest_ai_record.status == "pending" %}
+                                <p class="review-note">
+                                    AI 分析正在處理中。
+                                </p>
+
+                            {% elif latest_ai_record.status == "failed" %}
+                                <p class="review-error">
+                                    最近一次 AI 分析未完成，請確認狀態後重試。
+                                </p>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </section>
+            {% endif %}
 
             <!-- Human Review Form -->
             <section class="review-section">

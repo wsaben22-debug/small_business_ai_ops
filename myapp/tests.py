@@ -2389,6 +2389,67 @@ class AIAssistWorkflowTests(TestCase):
 
         mock_generate.assert_called_once()
 
+        review_record, review_error = submit_human_review(
+            decision,
+            "review_requested_action",
+            "測試 AI 分析後完成人工審核",
+        )
+
+        self.assertIsNone(review_error)
+        self.assertIsNotNone(review_record)
+
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("high_risk_review", args=[ticket.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertContains(
+            response,
+            "此案件已完成人工審核",
+        )
+
+        self.assertNotContains(
+            response,
+            "執行 AI 輔助分析",
+        )
+
+        self.assertContains(
+            response,
+            expected_output["summary"],
+        )
+
+        self.assertContains(
+            response,
+            expected_output["risk_notes"][0],
+        )
+
+        self.assertContains(
+            response,
+            expected_output["reply_draft"],
+        )
+
+        ticket.status = "closed"
+        ticket.save(update_fields=["status"])
+
+        response = self.client.get(
+            reverse("high_risk_review", args=[ticket.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertContains(
+            response,
+            expected_output["summary"],
+        )
+
+        self.assertNotContains(
+            response,
+            "執行 AI 輔助分析",
+        )
+
     def test_failed_ai_assist_saves_failed_record(self):
 
         from .ai_service import run_ai_assist
@@ -2879,3 +2940,118 @@ class AIAssistWorkflowTests(TestCase):
         )
 
         mock_retry.assert_called_once()
+
+class AIAssistWebEndpointTests(TestCase):
+
+    def test_anonymous_post_redirects_to_login(self):
+
+        url = reverse(
+            "run_ticket_ai_assist",
+            args=[1],
+        )
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)
+
+        self.assertIn(
+            "/login/",
+            response["Location"],
+        )
+
+    def test_authenticated_requests_require_post_and_csrf(self):
+
+        from django.test import Client
+
+        user = User.objects.create_user(
+            username="ai_web_security_user",
+            password="Test1234!",
+        )
+
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(user)
+
+        url = reverse(
+            "run_ticket_ai_assist",
+            args=[1],
+        )
+
+        get_response = client.get(url)
+
+        self.assertEqual(
+            get_response.status_code,
+            405,
+        )
+
+        post_response = client.post(url)
+
+        self.assertEqual(
+            post_response.status_code,
+            403,
+        )
+
+    def test_authenticated_post_runs_ai_assist(self):
+
+        user = User.objects.create_user(
+            username="ai_web_user",
+            password="Test1234!",
+        )
+
+        customer = Customer.objects.create(
+            name="Web AI 測試客戶",
+            phone="0912345678",
+            email="web-ai@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="測試地址",
+            status="paid",
+            order_number="WEB-AI-001",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="商品損壞，希望退款。",
+            status="open",
+        )
+
+        decision, route, _ = run_triage_workflow(
+            ticket,
+            "manual",
+        )
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(route, "human_review")
+
+        self.client.force_login(user)
+
+        url = reverse(
+            "run_ticket_ai_assist",
+            args=[ticket.id],
+        )
+
+        with patch(
+            "myapp.ai_service.run_ai_assist",
+            return_value=(object(), None),
+        ) as mock_run:
+
+            response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)
+
+        self.assertEqual(
+            response.url,
+            reverse(
+                "high_risk_review",
+                args=[ticket.id],
+            ),
+        )
+
+        mock_run.assert_called_once_with(
+            decision,
+            user,
+        )

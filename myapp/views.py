@@ -422,15 +422,78 @@ def high_risk_review(request, ticket_id):
         latest_decision
     )
 
+    latest_ai_record = (
+        latest_decision.ai_assist_records
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+
+    review_completed = hasattr(
+        latest_decision,
+        "human_review_record",
+    )
+
     context = {
         "ticket": ticket,
         "package": package,
         "error": error,
         "review_error": review_error,
+        "latest_ai_record": latest_ai_record,
+        "review_completed": review_completed,
     }
 
     return render(
         request,
         "myapp/high_risk_review.html",
         context,
+    )
+
+@login_required
+@require_POST
+def run_ticket_ai_assist(request, ticket_id):
+
+    from .ai_service import run_ai_assist
+
+    ticket = get_object_or_404(
+        SupportTicket,
+        id=ticket_id,
+    )
+
+    latest_decision = (
+        ticket.triage_decisions
+        .order_by("-created_at")
+        .first()
+    )
+
+    if latest_decision is None:
+        messages.error(
+            request,
+            "此案件尚未完成風險評估，無法執行 AI 分析。",
+        )
+
+        return redirect(
+            "high_risk_review",
+            ticket_id=ticket.id,
+        )
+
+    record, error = run_ai_assist(
+        latest_decision,
+        request.user,
+    )
+
+    if error is not None:
+        messages.error(
+            request,
+            "AI 輔助分析未完成，請確認案件狀態或稍後重試。",
+        )
+
+    else:
+        messages.success(
+            request,
+            "AI 輔助分析已完成。",
+        )
+
+    return redirect(
+        "high_risk_review",
+        ticket_id=ticket.id,
     )
