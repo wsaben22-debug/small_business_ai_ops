@@ -15,3 +15,6 @@ db.sqlite3
 
 # VS Code 本機設定
 .vscode/
+
+# Database backups
+backups/
