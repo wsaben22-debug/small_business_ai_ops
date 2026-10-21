@@ -2,6 +2,7 @@ import json
 import os
 import re
 
+import logging
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
@@ -12,6 +13,8 @@ from .models import TicketAIAssistRecord
 
 from django.db import IntegrityError, transaction
 from .triage_service import build_high_risk_support_package
+
+logger = logging.getLogger(__name__)
 
 class AIAssistOutput(BaseModel):
 
@@ -119,7 +122,18 @@ def generate_ai_assist(snapshot):
 
         return result.model_dump(), None
 
-    except Exception:
+    except Exception as exc:
+        status_code = getattr(exc, "code", None)
+
+        if not isinstance(status_code, int):
+            status_code = None
+
+        logger.error(
+            "Gemini AI Assist failed. error_type=%s, status_code=%s",
+            type(exc).__name__,
+            status_code,
+        )
+
         return None, "GEMINI_REQUEST_FAILED"
 
     finally:
