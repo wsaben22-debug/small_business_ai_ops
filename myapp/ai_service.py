@@ -138,7 +138,13 @@ def generate_ai_assist(snapshot):
 
     finally:
         if client is not None:
-            client.close()
+            try:
+                client.close()
+            except Exception as exc:
+                logger.warning(
+                    "Gemini AI Assist client close failed. error_type=%s",
+                    type(exc).__name__,
+                )
 
 def run_ai_assist(decision, user):
 

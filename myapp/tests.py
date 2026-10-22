@@ -2166,6 +2166,62 @@ class AIAssistOutputTests(TestCase):
 
 class GeminiServiceTests(TestCase):
 
+    def test_successful_result_survives_client_close_failure(self):
+        from .ai_service import generate_ai_assist
+
+        expected_output = {
+            "summary": "Damaged item.",
+            "risk_notes": ["Requires human review"],
+            "reply_draft": "We have received your request.",
+        }
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "fake-test-key"}):
+            with patch("myapp.ai_service.genai.Client") as mock_client:
+                client = mock_client.return_value
+                client.models.generate_content.return_value.text = json.dumps(
+                    expected_output
+                )
+                client.close.side_effect = RuntimeError("sensitive-close-detail")
+
+                with self.assertLogs("myapp.ai_service", level="WARNING") as logs:
+                    result, error = generate_ai_assist({"ticket_message": "Refund"})
+
+        self.assertEqual(result, expected_output)
+        self.assertIsNone(error)
+        client.close.assert_called_once()
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("sensitive-close-detail", logs.output[0])
+        self.assertNotIn("fake-test-key", logs.output[0])
+        self.assertIsNone(logs.records[0].exc_info)
+
+    def test_original_failure_survives_client_close_failure(self):
+        from .ai_service import generate_ai_assist
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "fake-test-key"}):
+            with patch("myapp.ai_service.genai.Client") as mock_client:
+                client = mock_client.return_value
+                client.models.generate_content.side_effect = ValueError(
+                    "sensitive-request-detail"
+                )
+                client.close.side_effect = RuntimeError("sensitive-close-detail")
+
+                with self.assertLogs("myapp.ai_service", level="WARNING") as logs:
+                    result, error = generate_ai_assist({"ticket_message": "Refund"})
+
+        self.assertIsNone(result)
+        self.assertEqual(error, "GEMINI_REQUEST_FAILED")
+        client.close.assert_called_once()
+        self.assertEqual(len(logs.records), 2)
+        self.assertIn("ValueError", logs.output[0])
+        self.assertIn("RuntimeError", logs.output[1])
+        for entry in logs.output:
+            self.assertNotIn("sensitive-request-detail", entry)
+            self.assertNotIn("sensitive-close-detail", entry)
+            self.assertNotIn("fake-test-key", entry)
+        for entry in logs.records:
+            self.assertIsNone(entry.exc_info)
+
     def test_generate_ai_assist_returns_valid_output(self):
 
         from .ai_service import generate_ai_assist
@@ -2317,6 +2373,67 @@ class GeminiServiceTests(TestCase):
             )
 
 class AIAssistWorkflowTests(TestCase):
+
+    def test_client_close_failure_does_not_leave_pending_record(self):
+        from .ai_service import run_ai_assist
+
+        user = User.objects.create_user(username="ai_close_failure_user")
+        customer = Customer.objects.create(
+            name="AI close failure customer",
+            phone="0912345678",
+            email="ai-close@example.com",
+        )
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="Test address",
+            status="paid",
+            order_number="AI-CLOSE-001",
+        )
+        expected_output = {
+            "summary": "Damaged item.",
+            "risk_notes": ["Requires human review"],
+            "reply_draft": "We have received your request.",
+        }
+
+        for status, request_error, expected_error, output in (
+            ("success", None, None, expected_output),
+            ("failed", ValueError("API failure"), "GEMINI_REQUEST_FAILED", None),
+        ):
+            with self.subTest(status=status):
+                ticket = SupportTicket.objects.create(
+                    customer=customer,
+                    order=order,
+                    category="refund",
+                    requested_action="refund",
+                    message="Damaged item, requesting a refund.",
+                    status="open",
+                )
+                decision, route, _ = run_triage_workflow(ticket, "manual")
+                self.assertEqual(route, "human_review")
+
+                with patch.dict("os.environ", {"GEMINI_API_KEY": "fake-test-key"}):
+                    with patch("myapp.ai_service.genai.Client") as mock_client:
+                        client = mock_client.return_value
+                        client.models.generate_content.return_value.text = json.dumps(
+                            expected_output
+                        )
+                        client.models.generate_content.side_effect = request_error
+                        client.close.side_effect = RuntimeError("close failure")
+
+                        with self.assertLogs("myapp.ai_service", level="WARNING"):
+                            record, error = run_ai_assist(decision, user)
+
+                self.assertEqual(error, expected_error)
+                record.refresh_from_db()
+                self.assertEqual(record.status, status)
+                self.assertEqual(record.output_data, output)
+                self.assertEqual(record.error_code, expected_error or "")
+                self.assertIsNotNone(record.completed_at)
+                self.assertEqual(decision.ai_assist_records.count(), 1)
+                self.assertFalse(
+                    decision.ai_assist_records.filter(status="pending").exists()
+                )
+                client.close.assert_called_once()
 
     def test_successful_ai_assist_saves_record(self):
 
