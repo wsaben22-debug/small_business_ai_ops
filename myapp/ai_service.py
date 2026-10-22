@@ -99,7 +99,7 @@ def generate_ai_assist(snapshot):
         )
 
         response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-3.5-flash-lite",
             contents=(
                 "你是客服案件的 AI 輔助分析助手。"
                 "請使用繁體中文，根據案件資料產生："
@@ -113,6 +113,9 @@ def generate_ai_assist(snapshot):
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=AIAssistOutput,
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="low",
+                ),
             ),
         )
 
@@ -166,7 +169,7 @@ def run_ai_assist(decision, user):
             decision=decision,
             status="success",
             input_snapshot=snapshot,
-            model_name="gemini-3.8-flash",
+            model_name="gemini-3.5-flash-lite",
             prompt_version="v1",
         )
         .order_by("-created_at")
@@ -203,7 +206,7 @@ def run_ai_assist(decision, user):
                 decision=decision,
                 requested_by=user,
                 input_snapshot=snapshot,
-                model_name="gemini-3.8-flash",
+                model_name="gemini-3.5-flash-lite",
                 prompt_version="v1",
             )
 
