@@ -1489,6 +1489,82 @@ class TicketTriageWorkflowTests(TestCase):
         self.assertTrue(reason)
         self.assertEqual(self.ticket.status, "in_progress")
 
+        decision.refresh_from_db()
+        self.assertEqual(decision.risk_gate_record.route, "auto_handle")
+        execution = decision.execution_records.get()
+        self.assertEqual(execution.execution_status, "success")
+        self.assertEqual(execution.ticket_status_before, "open")
+        self.assertEqual(execution.ticket_status_after, "in_progress")
+
+    def test_execution_workflow_rolls_back_decision_when_gate_write_fails(self):
+        from django.db import IntegrityError
+
+        def fail_gate_write(**kwargs):
+            self.assertTrue(
+                TicketTriageDecision.objects.filter(pk=kwargs["decision"].pk).exists()
+            )
+            raise IntegrityError("injected gate write failure")
+
+        with patch(
+            "myapp.triage_service.TriageRiskGateRecord.objects.create",
+            side_effect=fail_gate_write,
+        ):
+            with self.assertRaisesMessage(IntegrityError, "injected gate write failure"):
+                run_triage_execution_workflow(self.ticket, "manual")
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.status, "open")
+        self.assertFalse(TicketTriageDecision.objects.exists())
+        self.assertFalse(TriageRiskGateRecord.objects.exists())
+        self.assertFalse(TriageExecutionRecord.objects.exists())
+
+    def test_execution_workflow_rolls_back_all_writes_when_execution_write_fails(self):
+        from django.db import IntegrityError
+
+        self.ticket.requested_action = "info"
+        self.ticket.save(update_fields=["requested_action"])
+
+        def fail_execution_write(**kwargs):
+            decision = kwargs["decision"]
+            self.assertTrue(
+                TicketTriageDecision.objects.filter(pk=decision.pk).exists()
+            )
+            self.assertTrue(
+                TriageRiskGateRecord.objects.filter(decision=decision).exists()
+            )
+            self.assertEqual(
+                SupportTicket.objects.get(pk=self.ticket.pk).status, "in_progress"
+            )
+            raise IntegrityError("injected execution write failure")
+
+        with patch(
+            "myapp.triage_service.TriageExecutionRecord.objects.create",
+            side_effect=fail_execution_write,
+        ):
+            with self.assertRaisesMessage(IntegrityError, "injected execution write failure"):
+                run_triage_execution_workflow(self.ticket, "manual")
+
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.status, "open")
+        self.assertFalse(TicketTriageDecision.objects.exists())
+        self.assertFalse(TriageRiskGateRecord.objects.exists())
+        self.assertFalse(TriageExecutionRecord.objects.exists())
+
+    def test_execution_workflow_preserves_human_review_route(self):
+        decision, route, action_code, reason = run_triage_execution_workflow(
+            self.ticket, "manual"
+        )
+
+        self.ticket.refresh_from_db()
+        decision.refresh_from_db()
+        self.assertEqual(route, "human_review")
+        self.assertIsNone(action_code)
+        self.assertEqual(reason, decision.human_reason)
+        self.assertEqual(self.ticket.status, "open")
+        self.assertEqual(self.ticket.triage_decisions.count(), 1)
+        self.assertEqual(decision.risk_gate_record.route, "human_review")
+        self.assertFalse(decision.execution_records.exists())
+
     def test_high_risk_support_package_is_created_for_human_review(self):
         decision, error = run_triage(self.ticket, "manual")
 

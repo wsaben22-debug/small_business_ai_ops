@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.utils import timezone
 from .models import (
     Customer,
@@ -403,6 +404,7 @@ def execute_low_risk_action(decision):
         action_reason,
     )
 
+@transaction.atomic
 def run_triage_execution_workflow(ticket, trigger_type):
     decision, route, route_reason = run_triage_workflow(
         ticket,
