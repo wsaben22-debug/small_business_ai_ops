@@ -3353,6 +3353,158 @@ class AIAssistFailureUXTests(TestCase):
         self.assertEqual(decision.ai_assist_records.count(), 1)
 
 
+class TicketSearchUITests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="search_ui_user", is_staff=True)
+        cls.customer = Customer.objects.create(
+            name="Search customer", email="search@example.com"
+        )
+        cls.order = Order.objects.create(
+            customer=cls.customer, shipping_address="Test", status="paid",
+            order_number="SEARCH-A001",
+        )
+        cls.pending = SupportTicket.objects.create(
+            customer=cls.customer, order=cls.order, category="refund",
+            requested_action="refund", message="Pending review", status="open",
+        )
+        cls.decision, _, _ = run_triage_workflow(cls.pending, "manual")
+        cls.reviewed = SupportTicket.objects.create(
+            customer=cls.customer, order=cls.order, category="refund",
+            requested_action="refund", message="Already reviewed", status="open",
+        )
+        decision, _, _ = run_triage_workflow(cls.reviewed, "manual")
+        submit_human_review(decision, "review_requested_action", "Reviewed")
+        other_order = Order.objects.create(
+            customer=cls.customer, shipping_address="Test", status="paid",
+            order_number="SEARCH-B002",
+        )
+        cls.auto = SupportTicket.objects.create(
+            customer=cls.customer, order=other_order, category="other",
+            requested_action="info", message="Auto handled", status="open",
+        )
+        run_triage_execution_workflow(cls.auto, "manual")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.list_url = reverse("ticket_list")
+        self.dashboard_url = reverse("triage_dashboard")
+
+    def test_search_by_exact_ticket_id_and_partial_order_number(self):
+        for query, list_ids, queue_ids in (
+            (str(self.pending.pk), [self.pending.pk], [self.pending.pk]),
+            (" search-a ", [self.pending.pk, self.reviewed.pk], [self.pending.pk]),
+            ("search-b", [self.auto.pk], []),
+            ("9" * 100, [], []),
+        ):
+            with self.subTest(query=query):
+                response = self.client.get(self.list_url, {"q": query})
+                self.assertEqual(response.status_code, 200)
+                self.assertCountEqual(
+                    [ticket.pk for ticket in response.context["tickets"]], list_ids
+                )
+                self.assertContains(response, "Ticket ID")
+                response = self.client.get(self.dashboard_url, {"q": query})
+                self.assertEqual(response.status_code, 200)
+                self.assertCountEqual(
+                    [item["ticket_id"] for item in response.context["high_risk_queue"]],
+                    queue_ids,
+                )
+
+    def test_search_preserves_status_category_and_filter_links(self):
+        response = self.client.get(self.list_url, {
+            "q": "SEARCH-A", "status": "open", "category": "refund",
+        })
+        self.assertCountEqual(
+            [ticket.pk for ticket in response.context["tickets"]],
+            [self.pending.pk, self.reviewed.pk],
+        )
+        self.assertContains(response, 'value="SEARCH-A"')
+        self.assertContains(response, 'name="status" value="open"')
+        self.assertContains(response, 'name="category" value="refund"')
+        self.assertContains(
+            response, 'href="?q=SEARCH-A&amp;status=in_progress&amp;category=refund"'
+        )
+        for changes in ({"status": "closed"}, {"category": "delivery"}):
+            response = self.client.get(self.list_url, {
+                "q": "SEARCH-A", "status": "open", "category": "refund", **changes,
+            })
+            self.assertEqual(list(response.context["tickets"]), [])
+
+    def test_dashboard_search_preserves_metrics_history_and_queue_rules(self):
+        baseline = self.client.get(self.dashboard_url)
+        for query, expected in (
+            (str(self.pending.pk), [self.pending.pk]),
+            (str(self.reviewed.pk), []),
+            ("not-found", []),
+        ):
+            with self.subTest(query=query):
+                response = self.client.get(self.dashboard_url, {"q": query})
+                self.assertEqual(response.context["metrics"], baseline.context["metrics"])
+                self.assertEqual(
+                    response.context["recent_execution_history"],
+                    baseline.context["recent_execution_history"],
+                )
+                self.assertEqual(
+                    [item["ticket_id"] for item in response.context["high_risk_queue"]],
+                    expected,
+                )
+
+        # The persisted Gate, not a fresh rule evaluation, determines the route.
+        TriageRiskGateRecord.objects.filter(decision=self.decision).update(route="auto_handle")
+        response = self.client.get(self.dashboard_url, {"q": str(self.pending.pk)})
+        self.assertEqual(response.context["high_risk_queue"], [])
+        # An older human_review Decision must not override the latest Decision.
+        TriageRiskGateRecord.objects.filter(decision=self.decision).update(route="human_review")
+        self.pending.requested_action = "info"
+        self.pending.save(update_fields=["requested_action"])
+        run_triage_workflow(self.pending, "manual")
+        response = self.client.get(self.dashboard_url, {"q": str(self.pending.pk)})
+        self.assertEqual(response.context["high_risk_queue"], [])
+
+    def test_empty_results_clear_links_and_safe_search_echo(self):
+        for url in (self.list_url, self.dashboard_url):
+            with self.subTest(url=url):
+                response = self.client.get(url, {"q": '<script>alert("x")</script>'})
+                self.assertContains(response, "沒有符合搜尋條件的案件")
+                self.assertNotContains(response, '<script>alert("x")</script>')
+                self.assertContains(response, "&lt;script&gt;")
+                self.assertContains(
+                    response,
+                    f'<a class="secondary-button" href="{url}">清除條件</a>',
+                    html=True,
+                )
+                cleared = self.client.get(url)
+                self.assertNotContains(cleared, "沒有符合搜尋條件的案件")
+        self.pending.status = "closed"
+        self.pending.save(update_fields=["status"])
+        response = self.client.get(self.dashboard_url)
+        self.assertContains(response, "目前沒有需要人工審核的高風險案件。")
+
+    def test_list_and_queue_queries_do_not_grow_per_ticket(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as small_list:
+            self.client.get(self.list_url)
+        with CaptureQueriesContext(connection) as small_queue:
+            get_high_risk_queue()
+        for index in range(4):
+            ticket = SupportTicket.objects.create(
+                customer=self.customer, order=self.order, category="refund",
+                requested_action="refund", message=f"Extra {index}", status="open",
+            )
+            run_triage_workflow(ticket, "manual")
+        with CaptureQueriesContext(connection) as larger_list:
+            self.client.get(self.list_url)
+        with CaptureQueriesContext(connection) as larger_queue:
+            queue = get_high_risk_queue()
+        self.assertEqual(len(queue), 5)
+        self.assertLessEqual(len(larger_list), len(small_list))
+        self.assertLessEqual(len(larger_queue), len(small_queue))
+
+
 class PrepareLiveDemoCommandTests(TestCase):
 
     def setUp(self):

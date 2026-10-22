@@ -339,6 +339,56 @@ body {
 
 /* Filter Panel */
 
+.search-form {
+    margin: 0 0 20px;
+}
+
+.search-form label {
+    display: block;
+    margin-bottom: 10px;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.search-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.search-controls input[type="search"] {
+    flex: 1 1 240px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #1f2937;
+    font: inherit;
+    font-size: 14px;
+}
+
+.search-controls input:focus-visible,
+.search-controls a:focus-visible,
+.search-controls button:focus-visible {
+    outline: 2px solid #64748b;
+    outline-offset: 2px;
+}
+
+.search-controls button {
+    border: 0;
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.search-note {
+    margin: 10px 0 0;
+    color: #64748b;
+    font-size: 13px;
+}
+
 .filter-panel {
     margin-bottom: 24px;
     padding: 20px;
@@ -464,6 +514,14 @@ body {
 
     .ticket-list-section {
         overflow-x: auto;
+    }
+
+    .table-section {
+        overflow-x: auto;
+    }
+
+    .header-actions {
+        flex-wrap: wrap;
     }
 }
 

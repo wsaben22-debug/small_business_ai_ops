@@ -5,6 +5,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>客服案件列表</title>
 
     <link
@@ -75,6 +76,24 @@
         <!-- Filters -->
         <section class="filter-panel">
 
+            <form method="get" class="search-form" action="{% url 'ticket_list' %}">
+                <label for="ticket-search">搜尋案件</label>
+                <div class="search-controls">
+                    <input id="ticket-search" type="search" name="q"
+                           value="{{ search_query }}" placeholder="Ticket ID 或訂單編號"
+                           aria-describedby="ticket-search-help">
+                    {% if selected_status %}
+                        <input type="hidden" name="status" value="{{ selected_status }}">
+                    {% endif %}
+                    {% if selected_category %}
+                        <input type="hidden" name="category" value="{{ selected_category }}">
+                    {% endif %}
+                    <button type="submit" class="action-button">搜尋</button>
+                    <a class="secondary-button" href="{% url 'ticket_list' %}">清除條件</a>
+                </div>
+                <p id="ticket-search-help" class="search-note">純數字精確搜尋 Ticket ID；其他文字搜尋訂單編號。</p>
+            </form>
+
             <div class="filter-group">
                 <span class="filter-label">處理狀態</span>
 
@@ -88,14 +107,14 @@
                         {% if selected_category %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?category={{ selected_category }}"
+                                href="{% querystring status=None category=selected_category %}"
                             >
                                 全部
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}"
+                                href="{% querystring status=None category=None %}"
                             >
                                 全部
                             </a>
@@ -111,14 +130,14 @@
                         {% if selected_category %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status=open&category={{ selected_category }}"
+                                href="{% querystring status='open' category=selected_category %}"
                             >
                                 待處理
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status=open"
+                                href="{% querystring status='open' category=None %}"
                             >
                                 待處理
                             </a>
@@ -134,14 +153,14 @@
                         {% if selected_category %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status=in_progress&category={{ selected_category }}"
+                                href="{% querystring status='in_progress' category=selected_category %}"
                             >
                                 處理中
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status=in_progress"
+                                href="{% querystring status='in_progress' category=None %}"
                             >
                                 處理中
                             </a>
@@ -157,14 +176,14 @@
                         {% if selected_category %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status=resolved&category={{ selected_category }}"
+                                href="{% querystring status='resolved' category=selected_category %}"
                             >
                                 已解決
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status=resolved"
+                                href="{% querystring status='resolved' category=None %}"
                             >
                                 已解決
                             </a>
@@ -180,14 +199,14 @@
                         {% if selected_category %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status=closed&category={{ selected_category }}"
+                                href="{% querystring status='closed' category=selected_category %}"
                             >
                                 已關閉
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status=closed"
+                                href="{% querystring status='closed' category=None %}"
                             >
                                 已關閉
                             </a>
@@ -211,14 +230,14 @@
                         {% if selected_status %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status={{ selected_status }}"
+                                href="{% querystring status=selected_status category=None %}"
                             >
                                 全部分類
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}"
+                                href="{% querystring status=None category=None %}"
                             >
                                 全部分類
                             </a>
@@ -234,14 +253,14 @@
                         {% if selected_status %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status={{ selected_status }}&category=delivery"
+                                href="{% querystring status=selected_status category='delivery' %}"
                             >
                                 配送問題
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?category=delivery"
+                                href="{% querystring status=None category='delivery' %}"
                             >
                                 配送問題
                             </a>
@@ -257,14 +276,14 @@
                         {% if selected_status %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status={{ selected_status }}&category=damaged"
+                                href="{% querystring status=selected_status category='damaged' %}"
                             >
                                 商品損壞
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?category=damaged"
+                                href="{% querystring status=None category='damaged' %}"
                             >
                                 商品損壞
                             </a>
@@ -280,14 +299,14 @@
                         {% if selected_status %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status={{ selected_status }}&category=missing"
+                                href="{% querystring status=selected_status category='missing' %}"
                             >
                                 商品缺失
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?category=missing"
+                                href="{% querystring status=None category='missing' %}"
                             >
                                 商品缺失
                             </a>
@@ -303,14 +322,14 @@
                         {% if selected_status %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status={{ selected_status }}&category=refund"
+                                href="{% querystring status=selected_status category='refund' %}"
                             >
                                 退貨問題
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?category=refund"
+                                href="{% querystring status=None category='refund' %}"
                             >
                                 退貨問題
                             </a>
@@ -326,14 +345,14 @@
                         {% if selected_status %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?status={{ selected_status }}&category=other"
+                                href="{% querystring status=selected_status category='other' %}"
                             >
                                 其他問題
                             </a>
                         {% else %}
                             <a
                                 class="filter-chip"
-                                href="{% url 'ticket_list' %}?category=other"
+                                href="{% querystring status=None category='other' %}"
                             >
                                 其他問題
                             </a>
@@ -352,6 +371,7 @@
 
                 <thead>
                     <tr>
+                        <th>Ticket ID</th>
                         <th>訂單編號</th>
                         <th>客戶姓名</th>
                         <th>問題分類</th>
@@ -364,6 +384,7 @@
                 <tbody>
                     {% for ticket in tickets %}
                         <tr>
+                            <td>{{ ticket.id }}</td>
                             <td>
                                 {{ ticket.order.order_number }}
                             </td>
@@ -418,7 +439,7 @@
 
                                     {% if request.user.is_staff %}
 
-                                        {% if ticket.triage_decisions.exists %}
+                                        {% if ticket.has_decision %}
                                             <span class="protected-label">
                                                 受保護
                                             </span>
@@ -434,7 +455,7 @@
 
                                     {% endif %}
 
-                                    {% if ticket.triage_decisions.exists %}
+                                    {% if ticket.has_decision %}
 
                                         <span class="status-badge triage-complete">
                                             已評估
@@ -467,9 +488,13 @@
                         <tr>
                             <td
                                 class="empty-table-message"
-                                colspan="6"
+                                colspan="7"
                             >
-                                目前沒有符合條件的客服案件
+                                {% if search_query %}
+                                    沒有符合搜尋條件的案件，請調整搜尋或清除條件。
+                                {% else %}
+                                    目前沒有符合條件的客服案件
+                                {% endif %}
                             </td>
                         </tr>
 

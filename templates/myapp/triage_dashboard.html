@@ -5,6 +5,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>客服案件決策儀表板</title>
 
     <link
@@ -91,8 +92,20 @@
         <hr>
 
         <!-- High Risk Queue -->
-        <section>
+        <section class="table-section">
             <h2>待人工審核案件</h2>
+
+            <form method="get" class="search-form" action="{% url 'triage_dashboard' %}">
+                <label for="queue-search">搜尋待人工審核案件</label>
+                <div class="search-controls">
+                    <input id="queue-search" type="search" name="q"
+                           value="{{ search_query }}" placeholder="Ticket ID 或訂單編號"
+                           aria-describedby="queue-search-help">
+                    <button type="submit" class="action-button">搜尋</button>
+                    <a class="secondary-button" href="{% url 'triage_dashboard' %}">清除條件</a>
+                </div>
+                <p id="queue-search-help" class="search-note">純數字精確搜尋 Ticket ID；其他文字搜尋訂單編號。搜尋僅套用於待審清單。</p>
+            </form>
 
             {% if high_risk_queue %}
                 <table class="ops-table">
@@ -193,14 +206,20 @@
                 </table>
 
             {% else %}
-                <p>目前沒有需要人工審核的高風險案件。</p>
+                <p class="empty-table-message">
+                    {% if search_query %}
+                        沒有符合搜尋條件的案件，請調整搜尋或清除條件。
+                    {% else %}
+                        目前沒有需要人工審核的高風險案件。
+                    {% endif %}
+                </p>
             {% endif %}
         </section>
 
         <hr>
 
         <!-- Recent Execution History -->
-        <section>
+        <section class="table-section">
             <h2>最近執行紀錄</h2>
 
             {% if recent_execution_history %}

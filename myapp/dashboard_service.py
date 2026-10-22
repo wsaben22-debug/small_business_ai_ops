@@ -1,22 +1,31 @@
+from django.db.models import Prefetch
+
 from .models import (
     SupportTicket,
+    TicketTriageDecision,
     TriageExecutionRecord,
 )
 from .triage_service import get_risk_gate_result
 
-def get_high_risk_queue():
-    tickets = SupportTicket.objects.filter(
+def get_high_risk_queue(tickets=None):
+    if tickets is None:
+        tickets = SupportTicket.objects.all()
+    tickets = tickets.filter(
         status__in=["open", "in_progress"]
+    ).prefetch_related(
+        Prefetch(
+            "triage_decisions",
+            queryset=TicketTriageDecision.objects.select_related(
+                "risk_gate_record", "human_review_record"
+            ).order_by("-created_at")[:1],
+            to_attr="latest_decisions",
+        )
     )
 
     high_risk_queue = []
 
     for ticket in tickets:
-        latest_decision = (
-            ticket.triage_decisions
-            .order_by("-created_at")
-            .first()
-        )
+        latest_decision = next(iter(ticket.latest_decisions), None)
 
         if latest_decision is None:
             continue

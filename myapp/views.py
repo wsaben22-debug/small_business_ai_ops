@@ -2,6 +2,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db.models import Exists, OuterRef
 from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -32,7 +33,7 @@ from .dashboard_service import (
 )
 from .evaluation_service import calculate_triage_metrics
 from .forms import SupportTicketForm
-from .models import SupportTicket
+from .models import SupportTicket, TicketTriageDecision
 from .permissions import IsAuthenticatedWriteAdminDelete
 from .serializers import SupportTicketSerializer
 from .triage_service import (
@@ -41,19 +42,42 @@ from .triage_service import (
     submit_human_review,
 )
 
+def _search_tickets(tickets, query):
+    if not query:
+        return tickets
+    if query.isascii() and query.isdecimal():
+        if len(query) > 19:
+            return tickets.none()
+        return tickets.filter(pk=int(query))
+    return tickets.filter(order__order_number__icontains=query)
+
+
 @login_required
 def ticket_list(request):
     status = request.GET.get('status')
     category = request.GET.get('category')
+    query = request.GET.get("q", "").strip()
 
-    tickets = SupportTicket.objects.all()
+    tickets = _search_tickets(
+        SupportTicket.objects.select_related("order", "customer").annotate(
+            has_decision=Exists(
+                TicketTriageDecision.objects.filter(ticket_id=OuterRef("pk"))
+            )
+        ),
+        query,
+    )
 
     if status:
         tickets = tickets.filter(status=status)
     if category:
         tickets = tickets.filter(category=category)
 
-    return render(request, 'ticket_list.html', {'tickets': tickets, 'selected_status': status, 'selected_category' : category})
+    return render(request, 'ticket_list.html', {
+        'tickets': tickets,
+        'selected_status': status,
+        'selected_category': category,
+        'search_query': query,
+    })
 
 @login_required
 def ticket_create(request):
@@ -352,14 +376,18 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 
 @login_required
 def triage_dashboard(request):
+    query = request.GET.get("q", "").strip()
     metrics = calculate_triage_metrics()
-    high_risk_queue = get_high_risk_queue()
+    high_risk_queue = get_high_risk_queue(
+        tickets=_search_tickets(SupportTicket.objects.all(), query)
+    )
     recent_execution_history = get_recent_execution_history()
 
     context = {
         "metrics": metrics,
         "high_risk_queue": high_risk_queue,
         "recent_execution_history": recent_execution_history,
+        "search_query": query,
     }
 
     return render(
