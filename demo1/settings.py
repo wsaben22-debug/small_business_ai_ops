@@ -122,3 +122,8 @@ REST_FRAMEWORK = {
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'ticket_list'
 LOGOUT_REDIRECT_URL = 'login'
+
+ALLOW_DEMO_DATA_RESET = (
+    os.environ.get("ALLOW_DEMO_DATA_RESET", "false").lower()
+    == "true"
+)

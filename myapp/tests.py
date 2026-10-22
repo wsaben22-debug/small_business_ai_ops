@@ -3055,3 +3055,159 @@ class AIAssistWebEndpointTests(TestCase):
             decision,
             user,
         )
+
+
+class PrepareLiveDemoCommandTests(TestCase):
+
+    def setUp(self):
+        from django.core.management import call_command
+
+        # 測試資料只建立在 Django Test Database
+        call_command(
+            "seed_demo",
+            "--with-tickets",
+            verbosity=0,
+        )
+
+    def test_dry_run_does_not_modify_created_at(self):
+        from django.core.management import call_command
+        from django.test import override_settings
+
+        from myapp.models import SupportTicket
+
+        ticket = SupportTicket.objects.get(
+            message__startswith="[DEMO-T001]"
+        )
+
+        original_created_at = ticket.created_at
+
+        with override_settings(ALLOW_DEMO_DATA_RESET=False):
+            call_command(
+                "prepare_live_demo",
+                verbosity=0,
+            )
+
+        ticket.refresh_from_db()
+
+        self.assertEqual(
+            ticket.created_at,
+            original_created_at,
+        )
+
+        self.assertEqual(
+            ticket.status,
+            "open",
+        )
+
+        self.assertFalse(
+            ticket.triage_decisions.exists()
+        )
+
+    def test_execute_updates_only_live_demo_tickets(self):
+        from datetime import timedelta
+
+        from django.core.management import call_command
+        from django.test import override_settings
+        from django.utils import timezone
+
+        from myapp.models import SupportTicket
+        from myapp.management.commands.seed_demo import (
+            DEMO_LIVE_TICKET_IDS,
+            DEMO_TICKETS,
+        )
+        from myapp.management.commands.seed_demo_triage import (
+            predict_demo_route,
+        )
+
+        # 先記錄一筆非 Live Ticket 的建立時間
+        other_ticket = SupportTicket.objects.get(
+            message__startswith="[DEMO-T003]"
+        )
+        original_other_time = other_ticket.created_at
+
+        # 只在隔離測試資料庫中開啟安全設定
+        with override_settings(
+            ALLOW_DEMO_DATA_RESET=True,
+            DEBUG=True,
+        ):
+            call_command(
+                "prepare_live_demo",
+                "--execute",
+                verbosity=0,
+            )
+
+        expected_routes = {
+            "DEMO-T001": "auto_handle",
+            "DEMO-T002": "human_review",
+            "DEMO-T004": "auto_handle",
+            "DEMO-T025": "human_review",
+            "DEMO-T034": "human_review",
+            "DEMO-T040": "human_review",
+        }
+
+        specs = {
+            data["demo_id"]: data
+            for data in DEMO_TICKETS
+            if data["demo_id"] in DEMO_LIVE_TICKET_IDS
+        }
+
+        for demo_id in DEMO_LIVE_TICKET_IDS:
+            ticket = SupportTicket.objects.get(
+                message__startswith=f"[{demo_id}]"
+            )
+
+            actual_hours = (
+                timezone.now() - ticket.created_at
+            ).total_seconds() / 3600
+
+            target_hours = specs[demo_id]["waiting_hours"]
+
+            self.assertAlmostEqual(
+                actual_hours,
+                target_hours,
+                delta=0.05,
+            )
+
+            self.assertEqual(
+                predict_demo_route(ticket),
+                expected_routes[demo_id],
+            )
+
+            self.assertEqual(ticket.status, "open")
+            self.assertFalse(ticket.triage_decisions.exists())
+
+        # 確認非 Live Ticket 沒有被更新
+        other_ticket.refresh_from_db()
+
+        self.assertEqual(
+            other_ticket.created_at,
+            original_other_time,
+        )
+
+    def test_execute_is_blocked_when_reset_disabled(self):
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from django.test import override_settings
+
+        from myapp.models import SupportTicket
+
+        ticket = SupportTicket.objects.get(
+            message__startswith="[DEMO-T001]"
+        )
+
+        original_created_at = ticket.created_at
+
+        with override_settings(ALLOW_DEMO_DATA_RESET=False):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "prepare_live_demo",
+                    "--execute",
+                    verbosity=0,
+                )
+
+        ticket.refresh_from_db()
+
+        self.assertEqual(
+            ticket.created_at,
+            original_created_at,
+        )
