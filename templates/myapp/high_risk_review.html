@@ -438,7 +438,12 @@
 
                             {% elif latest_ai_record.status == "failed" %}
                                 <p class="review-error">
-                                    最近一次 AI 分析未完成，請確認狀態後重試。
+                                    最近一次 AI 分析未完成。
+                                    {% if not review_completed %}
+                                        {% if ticket.status == "open" or ticket.status == "in_progress" %}
+                                            可稍後重試；人工審核仍可繼續。
+                                        {% endif %}
+                                    {% endif %}
                                 </p>
                             {% endif %}
                         </div>

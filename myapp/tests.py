@@ -3174,6 +3174,109 @@ class AIAssistWebEndpointTests(TestCase):
         )
 
 
+class AIAssistFailureUXTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="ai_failure_ux_user")
+        customer = Customer.objects.create(name="AI UX test customer")
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="Test address",
+            status="paid",
+            order_number="AI-UX-001",
+        )
+        cls.ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="refund",
+            requested_action="refund",
+            message="Damaged item, requesting a refund.",
+            status="open",
+        )
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.run_url = reverse("run_ticket_ai_assist", args=[self.ticket.id])
+        self.review_url = reverse("high_risk_review", args=[self.ticket.id])
+
+    def test_unassessed_ticket_explains_required_evaluation(self):
+        with patch("myapp.ai_service.run_ai_assist") as mock_run:
+            response = self.client.post(self.run_url, follow=True)
+
+        self.assertContains(response, "此案件尚未完成風險評估，無法執行 AI 分析。")
+        self.assertNotContains(response, "稍後重試")
+        self.assertNotContains(response, "This ticket has no triage decision")
+        mock_run.assert_not_called()
+
+    def test_error_messages_distinguish_restrictions_from_service_failure(self):
+        run_triage_workflow(self.ticket, "manual")
+        cases = (
+            ("AI_ASSIST_ALREADY_REVIEWED", "此案件已完成人工審核，無須重新執行 AI 分析。", False),
+            ("AI_ASSIST_TICKET_NOT_ELIGIBLE", "目前案件狀態無法執行 AI 分析，僅可查看歷史 AI 分析。", False),
+            ("AI_ASSIST_ALREADY_RUNNING", "AI 分析正在處理中，請勿重複送出；人工審核仍可繼續。", False),
+            ("decision is not routed to human review", "此案件未分派至人工審核，無法執行 AI 分析。", False),
+            ("GEMINI_REQUEST_FAILED", "AI 分析未完成，可稍後重試；人工審核仍可繼續。", True),
+            ("GEMINI_API_KEY is not configured", "AI 分析服務尚未就緒，請聯絡管理員；人工審核仍可繼續。", False),
+            ("RuntimeError: sensitive-server-error api_key=secret-test-key", "AI 分析未完成，請聯絡管理員確認；人工審核仍可繼續。", False),
+        )
+        for error, message, retry in cases:
+            with self.subTest(error=error):
+                with patch(
+                    "myapp.ai_service.run_ai_assist", return_value=(None, error)
+                ):
+                    response = self.client.post(self.run_url, follow=True)
+
+                self.assertContains(response, message)
+                if retry:
+                    self.assertContains(response, "稍後重試")
+                else:
+                    self.assertNotContains(response, "稍後重試")
+                self.assertNotContains(response, error)
+                self.assertNotContains(response, "secret-test-key")
+
+    def test_failed_analysis_keeps_history_and_allows_human_review(self):
+        decision, route, _ = run_triage_workflow(self.ticket, "manual")
+        self.assertEqual(route, "human_review")
+        with patch(
+            "myapp.ai_service.generate_ai_assist",
+            return_value=(None, "GEMINI_REQUEST_FAILED"),
+        ):
+            response = self.client.post(self.run_url, follow=True)
+
+        self.assertContains(response, "AI 分析未完成，可稍後重試；人工審核仍可繼續。")
+        self.assertContains(response, 'name="selected_action"')
+        record = decision.ai_assist_records.get()
+        self.assertEqual(record.status, "failed")
+        self.assertEqual(record.error_code, "GEMINI_REQUEST_FAILED")
+        self.assertIsNotNone(record.completed_at)
+
+        # A fresh GET must explain the stored failure without a flash message.
+        response = self.client.get(self.review_url)
+        self.assertContains(response, "可稍後重試；人工審核仍可繼續。")
+        self.assertNotContains(response, record.error_code)
+
+        self.ticket.status = "closed"
+        self.ticket.save(update_fields=["status"])
+        response = self.client.get(self.review_url)
+        self.assertContains(response, "最近一次 AI 分析未完成。")
+        self.assertNotContains(response, "稍後重試")
+
+        self.ticket.status = "open"
+        self.ticket.save(update_fields=["status"])
+        response = self.client.post(self.review_url, {
+            "selected_action": "review_requested_action",
+            "reason": "Continue human review after AI failure.",
+        })
+        self.assertRedirects(response, reverse("triage_dashboard"))
+        response = self.client.get(self.review_url)
+        self.assertContains(response, "此案件已完成人工審核")
+        self.assertNotContains(response, "稍後重試")
+        record.refresh_from_db()
+        self.assertEqual(record.status, "failed")
+        self.assertEqual(decision.ai_assist_records.count(), 1)
+
+
 class PrepareLiveDemoCommandTests(TestCase):
 
     def setUp(self):

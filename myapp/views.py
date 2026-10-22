@@ -385,7 +385,7 @@ def high_risk_review(request, ticket_id):
         context = {
             "ticket": ticket,
             "package": None,
-            "error": "This ticket has no triage decision.",
+            "error": "此案件尚未完成風險評估，無法執行 AI 分析。",
             "review_error": None,
         }
 
@@ -482,9 +482,32 @@ def run_ticket_ai_assist(request, ticket_id):
     )
 
     if error is not None:
+        error_messages = {
+            "AI_ASSIST_ALREADY_REVIEWED": (
+                "此案件已完成人工審核，無須重新執行 AI 分析。"
+            ),
+            "AI_ASSIST_TICKET_NOT_ELIGIBLE": (
+                "目前案件狀態無法執行 AI 分析，僅可查看歷史 AI 分析。"
+            ),
+            "AI_ASSIST_ALREADY_RUNNING": (
+                "AI 分析正在處理中，請勿重複送出；人工審核仍可繼續。"
+            ),
+            "decision is not routed to human review": (
+                "此案件未分派至人工審核，無法執行 AI 分析。"
+            ),
+            "GEMINI_REQUEST_FAILED": (
+                "AI 分析未完成，可稍後重試；人工審核仍可繼續。"
+            ),
+            "GEMINI_API_KEY is not configured": (
+                "AI 分析服務尚未就緒，請聯絡管理員；人工審核仍可繼續。"
+            ),
+        }
         messages.error(
             request,
-            "AI 輔助分析未完成，請確認案件狀態或稍後重試。",
+            error_messages.get(
+                error,
+                "AI 分析未完成，請聯絡管理員確認；人工審核仍可繼續。",
+            ),
         )
 
     else:
