@@ -1,8 +1,10 @@
+import re
+
 # Django
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Case, Exists, IntegerField, OuterRef, When
+from django.db.models import Case, Exists, IntegerField, OuterRef, Prefetch, Q, When
 from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -44,14 +46,26 @@ from .triage_service import (
     submit_human_review,
 )
 
+def _extract_demo_ticket_id(message):
+    match = re.match(r"^\[(DEMO-T\d{3})\](?:\s|$)", message or "")
+    return match.group(1) if match else None
+
+
 def _search_tickets(tickets, query):
     if not query:
         return tickets
+
     if query.isascii() and query.isdecimal():
         if len(query) > 19:
             return tickets.none()
+
         return tickets.filter(pk=int(query))
-    return tickets.filter(order__order_number__icontains=query)
+
+    return tickets.filter(
+        Q(order__order_number__icontains=query)
+        | Q(customer__name__icontains=query)
+        | Q(message__icontains=query)
+    )
 
 
 @login_required
@@ -61,7 +75,7 @@ def ticket_list(request):
     query = request.GET.get("q", "").strip()
 
     tickets = _search_tickets(
-        SupportTicket.objects.select_related("order", "customer").annotate(
+        SupportTicket.objects.select_related("order", "customer", "order__customer").annotate(
             has_decision=Exists(
                 TicketTriageDecision.objects.filter(ticket_id=OuterRef("pk"))
             )
@@ -82,7 +96,42 @@ def ticket_list(request):
             output_field=IntegerField(),
         ),
         "pk",
+    ).prefetch_related(
+        Prefetch(
+            "triage_decisions",
+            queryset=TicketTriageDecision.objects.select_related(
+                "risk_gate_record",
+                "human_review_record",
+            ).order_by("-created_at", "-pk")[:1],
+            to_attr="latest_decisions",
+        )
     )
+
+    for ticket in tickets:
+        ticket.demo_ticket_id = _extract_demo_ticket_id(ticket.message)
+
+        latest_decision = (
+            ticket.latest_decisions[0]
+            if ticket.latest_decisions
+            else None
+        )
+
+        if latest_decision is None:
+            ticket.review_status = "not_evaluated"
+
+        elif hasattr(latest_decision, "human_review_record"):
+            ticket.review_status = "completed"
+
+        elif hasattr(latest_decision, "risk_gate_record"):
+            if latest_decision.risk_gate_record.route == "human_review":
+                ticket.review_status = "pending"
+            elif latest_decision.risk_gate_record.route == "auto_handle":
+                ticket.review_status = "not_required"
+            else:
+                ticket.review_status = "unknown"
+
+        else:
+            ticket.review_status = "unknown"
 
     return render(request, 'ticket_list.html', {
         'tickets': tickets,
@@ -448,9 +497,10 @@ def triage_dashboard(request):
 @login_required
 def high_risk_review(request, ticket_id): 
     ticket = get_object_or_404(
-        SupportTicket,
+        SupportTicket.objects.select_related("order", "customer", "order__customer"),
         id=ticket_id,
     )
+    ticket.demo_ticket_id = _extract_demo_ticket_id(ticket.message)
 
     latest_decision = (
         ticket.triage_decisions

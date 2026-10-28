@@ -3391,6 +3391,151 @@ class TicketSearchUITests(TestCase):
         self.list_url = reverse("ticket_list")
         self.dashboard_url = reverse("triage_dashboard")
 
+    def test_search_by_demo_marker_customer_and_message(self):
+        customer = Customer.objects.create(
+            name="Demo 客戶 026",
+            email="demo026-search@example.com",
+        )
+
+        order = Order.objects.create(
+            customer=customer,
+            shipping_address="桃園",
+            status="paid",
+            order_number="DEMO-O036",
+        )
+
+        ticket = SupportTicket.objects.create(
+            customer=customer,
+            order=order,
+            category="missing",
+            requested_action="info",
+            message="[DEMO-T003] 空氣清淨機缺少主機，客戶詢問退款",
+            status="open",
+        )
+
+        queries = [
+            str(ticket.pk),
+            "DEMO-T003",
+            "demo-t003",
+            "DEMO-O036",
+            "Demo 客戶 026",
+            "空氣清淨機",
+            "退款",
+        ]
+
+        for query in queries:
+            with self.subTest(query=query):
+                response = self.client.get(
+                    self.list_url,
+                    {"q": query},
+                )
+
+                self.assertEqual(response.status_code, 200)
+
+                result_ids = [
+                    item.pk
+                    for item in response.context["tickets"]
+                ]
+
+                self.assertEqual(result_ids, [ticket.pk])
+
+    def test_ticket_list_displays_saved_review_states_without_recomputing_gate(self):
+        unevaluated = SupportTicket.objects.create(
+            customer=self.customer, order=self.order, category="refund",
+            requested_action="refund", message="Not evaluated", status="open",
+        )
+        missing_gate = SupportTicket.objects.create(
+            customer=self.customer, order=self.order, category="refund",
+            requested_action="refund", message="Missing saved Gate", status="open",
+        )
+        run_triage(missing_gate, "manual")
+        for ticket, expected_status, label in (
+            (unevaluated, "not_evaluated", "尚未評估"),
+            (self.auto, "not_required", "無須人工審核"),
+            (self.pending, "pending", "待人工審核"),
+            (self.reviewed, "completed", "審核完成"),
+            (missing_gate, "unknown", "狀態待確認"),
+        ):
+            with self.subTest(state=expected_status):
+                previous_status = ticket.status
+                with patch(
+                    "myapp.triage_service.evaluate_risk_gate",
+                    side_effect=AssertionError("Displaying a ticket must not evaluate its Gate"),
+                ):
+                    response = self.client.get(self.list_url, {"q": str(ticket.pk)})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["tickets"][0].review_status, expected_status)
+                self.assertContains(response, "審核狀態")
+                self.assertContains(response, label)
+                ticket.refresh_from_db()
+                self.assertEqual(ticket.status, previous_status)
+        self.assertContains(response, "不表示案件已解決或結案")
+
+    def test_ticket_list_review_state_uses_latest_decision_with_stable_tie_break(self):
+        latest, _ = run_triage(self.reviewed, "manual")
+        TriageRiskGateRecord.objects.create(
+            decision=latest, route="auto_handle", reason="Saved route is authoritative",
+            gate_version="risk_gate_v1",
+        )
+        TicketTriageDecision.objects.filter(ticket=self.reviewed).update(
+            created_at=latest.created_at
+        )
+        response = self.client.get(self.list_url, {"q": str(self.reviewed.pk)})
+        ticket = response.context["tickets"][0]
+        self.assertEqual(ticket.latest_decisions[0].pk, latest.pk)
+        self.assertEqual(ticket.review_status, "not_required")
+        self.assertContains(response, "無須人工審核")
+        # The previous completed review must not leak into a newer missing-Gate state.
+        run_triage(self.reviewed, "manual")
+        response = self.client.get(self.list_url, {"q": str(self.reviewed.pk)})
+        self.assertEqual(response.context["tickets"][0].review_status, "unknown")
+        self.assertContains(response, "狀態待確認")
+
+    def test_demo_and_general_identifiers_are_consistent_in_list_and_review(self):
+        self.order.order_number = "DEMO-O036"
+        self.order.save(update_fields=["order_number"])
+        self.customer.name = "Demo 客戶 026"
+        self.customer.save(update_fields=["name"])
+        for message, expected_demo_id in (
+            ("[DEMO-T003] Missing item", "DEMO-T003"),
+            ("[DEMO-T003]", "DEMO-T003"),
+            ("Ordinary ticket", None),
+            ("Mention [DEMO-T003] in the body", None),
+            ("[DEMO-T0034] Not a valid marker", None),
+        ):
+            with self.subTest(message=message):
+                self.pending.message = message
+                self.pending.save(update_fields=["message"])
+                for url, params in (
+                    (self.list_url, {"q": str(self.pending.pk)}),
+                    (reverse("high_risk_review", args=[self.pending.pk]), {}),
+                ):
+                    response = self.client.get(url, params)
+                    self.assertEqual(response.status_code, 200)
+                    ticket = (
+                        response.context["tickets"][0] if url == self.list_url
+                        else response.context["ticket"]
+                    )
+                    self.assertEqual(ticket.demo_ticket_id, expected_demo_id)
+                    self.assertContains(response, f"Ticket #{self.pending.pk}")
+                    self.assertContains(response, "DEMO-O036")
+                    self.assertContains(response, "Demo 客戶 026")
+                    if expected_demo_id:
+                        self.assertContains(response, f"<strong>{expected_demo_id}</strong>", html=True)
+        # Missing Ticket.customer uses the same order-customer fallback as the review package.
+        general = SupportTicket.objects.create(
+            customer=None, order=self.order, message="General unevaluated ticket", status="open",
+        )
+        for url, params in (
+            (self.list_url, {"q": str(general.pk)}),
+            (reverse("high_risk_review", args=[general.pk]), {}),
+        ):
+            response = self.client.get(url, params)
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, f"Ticket #{general.pk}")
+            self.assertContains(response, "Demo 客戶 026")
+            self.assertNotContains(response, "DEMO-T003")
+
     def test_search_by_exact_ticket_id_and_partial_order_number(self):
         for query, list_ids, queue_ids in (
             (str(self.pending.pk), [self.pending.pk], [self.pending.pk]),
@@ -3492,7 +3637,7 @@ class TicketSearchUITests(TestCase):
             get_high_risk_queue()
         for index in range(4):
             ticket = SupportTicket.objects.create(
-                customer=self.customer, order=self.order, category="refund",
+                customer=self.customer if index else None, order=self.order, category="refund",
                 requested_action="refund", message=f"Extra {index}", status="open",
             )
             run_triage_workflow(ticket, "manual")

@@ -5,6 +5,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>高風險案件人工審核</title>
 
     <link
@@ -22,6 +23,18 @@
                 <p class="review-subtitle">
                     檢視案件評估結果、決策建議與相關營運資訊
                 </p>
+                <div class="review-identity" aria-label="案件識別資訊">
+                    <div class="ticket-identifier">
+                        {% if ticket.demo_ticket_id %}
+                            <strong>{{ ticket.demo_ticket_id }}</strong>
+                        {% endif %}
+                        <span class="ticket-reference">Ticket #{{ ticket.id }}</span>
+                    </div>
+                    <div class="review-identity-meta">
+                        <span>訂單：{{ ticket.order.order_number }}</span>
+                        <span>客戶：{% firstof ticket.customer.name ticket.order.customer.name "未提供" %}</span>
+                    </div>
+                </div>
             </div>
 
             <a

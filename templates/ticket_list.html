@@ -81,7 +81,8 @@
                 <label for="ticket-search">搜尋案件</label>
                 <div class="search-controls">
                     <input id="ticket-search" type="search" name="q"
-                           value="{{ search_query }}" placeholder="Ticket ID 或訂單編號"
+                           value="{{ search_query }}"
+                           placeholder="搜尋案件編號、訂單、客戶或問題關鍵字"
                            aria-describedby="ticket-search-help">
                     {% if selected_status %}
                         <input type="hidden" name="status" value="{{ selected_status }}">
@@ -92,7 +93,10 @@
                     <button type="submit" class="action-button">搜尋</button>
                     <a class="secondary-button" href="{% url 'ticket_list' %}">清除條件</a>
                 </div>
-                <p id="ticket-search-help" class="search-note">純數字精確搜尋 Ticket ID；其他文字搜尋訂單編號。</p>
+                <p id="ticket-search-help" class="search-note">
+                    支援 Ticket ID、Demo 案件編號、訂單編號、客戶姓名及問題內容。
+                    純數字精確搜尋 Ticket ID。
+                </p>
             </form>
 
             <div class="filter-group">
@@ -377,6 +381,7 @@
                         <th>客戶姓名</th>
                         <th>問題分類</th>
                         <th>處理狀態</th>
+                        <th>審核狀態</th>
                         <th>問題內容</th>
                         <th>操作</th>
                     </tr>
@@ -385,13 +390,20 @@
                 <tbody>
                     {% for ticket in tickets %}
                         <tr>
-                            <td>{{ ticket.id }}</td>
+                            <td class="ticket-identifier">
+                                {% if ticket.demo_ticket_id %}
+                                    <strong>{{ ticket.demo_ticket_id }}</strong>
+                                    <span class="ticket-reference">Ticket #{{ ticket.id }}</span>
+                                {% else %}
+                                    Ticket #{{ ticket.id }}
+                                {% endif %}
+                            </td>
                             <td>
                                 {{ ticket.order.order_number }}
                             </td>
 
                             <td>
-                                {{ ticket.customer.name }}
+                                {% firstof ticket.customer.name ticket.order.customer.name "未提供" %}
                             </td>
 
                             <td>
@@ -424,7 +436,21 @@
                                 {% endif %}
                             </td>
 
-                            <td>
+                            <td class="review-status-cell">
+                                {% if ticket.review_status == "not_evaluated" %}
+                                    <span class="status-badge triage-complete">尚未評估</span>
+                                {% elif ticket.review_status == "pending" %}
+                                    <span class="status-badge ticket-status-open">待人工審核</span>
+                                {% elif ticket.review_status == "completed" %}
+                                    <span class="status-badge ticket-status-resolved">審核完成</span>
+                                {% elif ticket.review_status == "not_required" %}
+                                    <span class="status-badge ticket-status-progress">無須人工審核</span>
+                                {% else %}
+                                    <span class="status-badge ticket-status-closed">狀態待確認</span>
+                                {% endif %}
+                            </td>
+
+                            <td class="ticket-message">
                                 {{ ticket.message }}
                             </td>
 
@@ -489,7 +515,7 @@
                         <tr>
                             <td
                                 class="empty-table-message"
-                                colspan="7"
+                                colspan="8"
                             >
                                 {% if search_query %}
                                     沒有符合搜尋條件的案件，請調整搜尋或清除條件。
@@ -504,6 +530,7 @@
 
             </table>
         </section>
+        <p class="search-note">審核完成僅代表人工審核已完成，不表示案件已解決或結案。</p>
 
     </div>
 </body>

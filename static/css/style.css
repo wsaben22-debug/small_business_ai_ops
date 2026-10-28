@@ -411,6 +411,60 @@ body {
 
 /* Ticket List */
 
+/* Ticket ID column */
+.ticket-list-section {
+    overflow-x: auto;
+}
+
+.ticket-list-section .ops-table {
+    min-width: 1080px;
+}
+
+.ticket-list-section .ops-table th:first-child,
+.ticket-list-section .ops-table td:first-child {
+    min-width: 110px;
+    white-space: nowrap;
+}
+
+.ticket-identifier {
+    white-space: nowrap;
+}
+
+.ticket-identifier strong,
+.ticket-reference {
+    display: block;
+}
+
+.ticket-reference {
+    color: #64748b;
+    font-size: 12px;
+}
+
+.review-status-cell {
+    min-width: 112px;
+    white-space: nowrap;
+}
+
+.ticket-message {
+    min-width: 200px;
+    overflow-wrap: anywhere;
+}
+
+.review-identity {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    margin-top: 14px;
+}
+
+.review-identity-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #64748b;
+    font-size: 13px;
+}
+
 .ticket-list-header {
     display: flex;
     justify-content: space-between;
