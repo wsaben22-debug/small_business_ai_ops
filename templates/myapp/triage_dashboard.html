@@ -1,4 +1,5 @@
-{% load static %}
+
+{% load static l10n %}
 
 <!DOCTYPE html>
 <html lang="zh-Hant">
@@ -22,7 +23,7 @@
             <div>
                 <h1>客服案件決策儀表板</h1>
                 <p class="review-subtitle">
-                    查看案件決策、人工審核與自動處理狀況
+                    掌握歷史處理成果與目前待審風險
                 </p>
             </div>
 
@@ -55,43 +56,144 @@
         </header>
 
         <!-- Summary Cards -->
-        <section class="summary-grid">
+        <section class="summary-grid operations-kpis" aria-label="營運指標">
 
             <div class="summary-card">
-                <h2>總決策數</h2>
+                <h2>歷史 Decision 總數</h2>
                 <p class="summary-value">
                     {{ metrics.total_decisions }}
                 </p>
                 <p class="summary-detail">
-                    全部決策
+                    含同一案件的歷次評估
                 </p>
             </div>
 
             <div class="summary-card">
-                <h2>人工審核</h2>
+                <h2>歷史人工分流</h2>
                 <p class="summary-value">
                     {{ metrics.human_review_count }}
                 </p>
                 <p class="summary-detail">
-                    {{ metrics.human_review_rate }}%
+                    {{ metrics.human_review_rate }}% 的歷史 Decision，非目前待審數
                 </p>
             </div>
 
             <div class="summary-card">
-                <h2>自動處理</h2>
+                <h2>自動處理成功</h2>
                 <p class="summary-value">
                     {{ metrics.auto_handled_count }}
                 </p>
                 <p class="summary-detail">
-                    {{ metrics.auto_handled_rate }}%
+                    {{ metrics.auto_handled_rate }}% 的歷史 Decision，不代表案件已結案
                 </p>
+            </div>
+
+            <div class="summary-card pending-kpi">
+                <h2>目前待人工審核</h2>
+                <p class="summary-value">{{ pending_review_count }}</p>
+                <p class="summary-detail">有效案件的最新評估待審數，不受搜尋影響</p>
             </div>
 
         </section>
 
+        <!-- High Priority -->
+        <section class="operations-panel table-section" aria-labelledby="high-priority-heading">
+            <h2 id="high-priority-heading">
+                高優先待審
+                <span class="section-count">{{ high_priority_queue|length }} 件</span>
+            </h2>
+
+            {% if high_priority_queue %}
+                <table class="ops-table">
+                    <thead>
+                        <tr>
+                            <th>Ticket ID</th>
+                            <th>優先等級</th>
+                            <th>分數</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in high_priority_queue %}
+                            <tr>
+                                <td>#{{ item.ticket_id }}</td>
+                                <td>
+                                    <span class="status-badge priority-high">高優先</span>
+                                </td>
+                                <td>{{ item.priority_score }}</td>
+                                <td>
+                                    <a class="action-button" href="{% url 'high_risk_review' item.ticket_id %}">人工審核</a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="empty-table-message">目前沒有高優先待審案件。</p>
+            {% endif %}
+        </section>
+
+        <!-- Statistics -->
+        <div class="operations-insights">
+
+            <section class="operations-panel" aria-labelledby="routing-heading">
+                <h2 id="routing-heading">
+                    歷史分流與處理成果
+                    <span class="section-count">{{ metrics.total_decisions }} 筆評估</span>
+                </h2>
+
+                <div class="ratio-row">
+                    <div class="ratio-label">
+                        <span>人工分流</span>
+                        <strong>{{ metrics.human_review_count }} / {{ metrics.total_decisions }} · {{ metrics.human_review_rate }}%</strong>
+                    </div>
+                    <div class="ratio-track" role="progressbar" aria-label="歷史人工分流比例"
+                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ metrics.human_review_rate|unlocalize }}">
+                        <span class="ratio-fill ratio-human" style="width: {{ metrics.human_review_rate|unlocalize }}%"></span>
+                    </div>
+                </div>
+
+                <div class="ratio-row">
+                    <div class="ratio-label">
+                        <span>自動處理成功</span>
+                        <strong>{{ metrics.auto_handled_count }} / {{ metrics.total_decisions }} · {{ metrics.auto_handled_rate }}%</strong>
+                    </div>
+                    <div class="ratio-track" role="progressbar" aria-label="歷史自動處理成功比例"
+                         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ metrics.auto_handled_rate|unlocalize }}">
+                        <span class="ratio-fill ratio-auto" style="width: {{ metrics.auto_handled_rate|unlocalize }}%"></span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="operations-panel" aria-labelledby="categories-heading">
+                <h2 id="categories-heading">
+                    客服案件分類
+                    <span class="section-count">{{ category_stats.total_tickets }} 件</span>
+                </h2>
+
+                {% for item in category_stats.categories %}
+                    <div class="ratio-row">
+                        <div class="ratio-label">
+                            <span>{{ item.label }}</span>
+                            <strong>{{ item.count }} 件 · {{ item.percentage }}%</strong>
+                        </div>
+                        <div class="ratio-track" role="progressbar" aria-label="{{ item.label }}案件占比"
+                             aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ item.percentage|unlocalize }}">
+                            <span class="ratio-fill" style="width: {{ item.percentage|unlocalize }}%"></span>
+                        </div>
+                    </div>
+                {% endfor %}
+
+                {% if not category_stats.total_tickets %}
+                    <p class="search-note">目前沒有客服案件。</p>
+                {% endif %}
+            </section>
+
+        </div>
+
         <hr>
 
-        <!-- High Risk Queue -->
+        <!-- Human Review Queue -->
         <section class="table-section">
             <h2>待人工審核案件</h2>
 
@@ -100,22 +202,26 @@
                 <div class="search-controls">
                     <input id="queue-search" type="search" name="q"
                            value="{{ search_query }}" placeholder="Ticket ID 或訂單編號"
-                           aria-describedby="queue-search-help">
+                           aria-label="搜尋 Ticket ID 或訂單編號">
+                    <input type="hidden" name="sort" value="{{ selected_sort }}">
+                    <input type="hidden" name="direction" value="{{ selected_direction }}">
                     <button type="submit" class="action-button">搜尋</button>
                     <a class="secondary-button" href="{% url 'triage_dashboard' %}">清除條件</a>
                 </div>
-                <p id="queue-search-help" class="search-note">純數字精確搜尋 Ticket ID；其他文字搜尋訂單編號。搜尋僅套用於待審清單。</p>
             </form>
 
             {% if high_risk_queue %}
                 <table class="ops-table">
                     <thead>
                         <tr>
-                            <th>案件 ID</th>
-                            <th>問題分類</th>
-                            <th>請求動作</th>
-                            <th>優先等級</th>
-                            <th>分數</th>
+                            {% for column in sort_headers %}
+                                <th scope="col" aria-sort="{{ column.aria_sort }}">
+                                    <a class="table-sort-link" href="{% querystring q=search_query sort=column.field direction=column.next_direction %}"
+                                       aria-label="{{ column.label }}，改為{{ column.next_label }}">
+                                        {{ column.label }} <span aria-hidden="true">{{ column.icon }}</span>
+                                    </a>
+                                </th>
+                            {% endfor %}
                             <th>審核原因</th>
                             <th>操作</th>
                         </tr>
@@ -125,6 +231,7 @@
                         {% for item in high_risk_queue %}
                             <tr>
                                 <td>{{ item.ticket_id }}</td>
+
                                 <td>
                                     {% if item.category == "delivery" %}
                                         配送問題
@@ -140,6 +247,7 @@
                                         {{ item.category }}
                                     {% endif %}
                                 </td>
+
                                 <td>
                                     {% if item.requested_action == "info" %}
                                         資訊查詢
@@ -155,6 +263,7 @@
                                         {{ item.requested_action }}
                                     {% endif %}
                                 </td>
+
                                 <td>
                                     {% if item.priority_level == "low" %}
                                         <span class="status-badge priority-low">
@@ -175,7 +284,9 @@
                                         {{ item.priority_level }}
                                     {% endif %}
                                 </td>
+
                                 <td>{{ item.priority_score }}</td>
+
                                 <td>
                                     {% if item.reason == "requested_action=exchange requires human review by default" %}
                                         換貨請求需由人工審核
@@ -196,6 +307,7 @@
                                         {{ item.reason }}
                                     {% endif %}
                                 </td>
+
                                 <td>
                                     <a class="action-button" href="{% url 'high_risk_review' item.ticket_id %}">人工審核
                                     </a>
@@ -214,6 +326,7 @@
                     {% endif %}
                 </p>
             {% endif %}
+
         </section>
 
         <hr>

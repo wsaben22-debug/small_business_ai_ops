@@ -2,7 +2,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db.models import Exists, OuterRef
+from django.db.models import Case, Exists, IntegerField, OuterRef, When
 from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -28,10 +28,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 # Local app imports
 from .dashboard_service import (
+    PENDING_SORT_OPTIONS,
     get_high_risk_queue,
     get_recent_execution_history,
+    sort_pending_queue,
 )
-from .evaluation_service import calculate_triage_metrics
+from .evaluation_service import calculate_ticket_category_stats, calculate_triage_metrics
 from .forms import SupportTicketForm
 from .models import SupportTicket, TicketTriageDecision
 from .permissions import IsAuthenticatedWriteAdminDelete
@@ -71,6 +73,16 @@ def ticket_list(request):
         tickets = tickets.filter(status=status)
     if category:
         tickets = tickets.filter(category=category)
+
+    tickets = tickets.order_by(
+        Case(
+            When(has_decision=False, status__in=("open", "in_progress"), then=0),
+            When(has_decision=False, then=1),
+            default=2,
+            output_field=IntegerField(),
+        ),
+        "pk",
+    )
 
     return render(request, 'ticket_list.html', {
         'tickets': tickets,
@@ -378,9 +390,40 @@ class SupportTicketViewSet(viewsets.ModelViewSet):
 def triage_dashboard(request):
     query = request.GET.get("q", "").strip()
     metrics = calculate_triage_metrics()
-    high_risk_queue = get_high_risk_queue(
-        tickets=_search_tickets(SupportTicket.objects.all(), query)
+    pending_queue = get_high_risk_queue()
+    high_priority_queue = [
+        item for item in pending_queue
+        if item["priority_level"] == "high" and item["has_persisted_gate"]
+    ]
+    high_risk_queue = pending_queue
+    if query:
+        matching_ids = set(
+            _search_tickets(SupportTicket.objects.all(), query).values_list("pk", flat=True)
+        )
+        high_risk_queue = [
+            item for item in pending_queue if item["ticket_id"] in matching_ids
+        ]
+    high_risk_queue, selected_sort, selected_direction = sort_pending_queue(
+        high_risk_queue,
+        request.GET.get("sort", "priority_level"),
+        request.GET.get("direction", "desc"),
     )
+    sort_headers = []
+    sort_labels = dict(PENDING_SORT_OPTIONS)
+    for field in ("ticket_id", "category", "requested_action", "priority_level", "priority_score"):
+        active = field == selected_sort
+        next_direction = (
+            ("desc" if selected_direction == "asc" else "asc") if active
+            else ("desc" if field in ("priority_level", "priority_score") else "asc")
+        )
+        sort_headers.append({
+            "field": field,
+            "label": sort_labels[field],
+            "next_direction": next_direction,
+            "next_label": "升冪" if next_direction == "asc" else "降冪",
+            "aria_sort": ("ascending" if selected_direction == "asc" else "descending") if active else "none",
+            "icon": ("↑" if selected_direction == "asc" else "↓") if active else "↕",
+        })
     recent_execution_history = get_recent_execution_history()
 
     context = {
@@ -388,6 +431,12 @@ def triage_dashboard(request):
         "high_risk_queue": high_risk_queue,
         "recent_execution_history": recent_execution_history,
         "search_query": query,
+        "pending_review_count": len(pending_queue),
+        "high_priority_queue": high_priority_queue,
+        "category_stats": calculate_ticket_category_stats(),
+        "sort_headers": sort_headers,
+        "selected_sort": selected_sort,
+        "selected_direction": selected_direction,
     }
 
     return render(

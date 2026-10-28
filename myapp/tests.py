@@ -3504,6 +3504,323 @@ class TicketSearchUITests(TestCase):
         self.assertLessEqual(len(larger_list), len(small_list))
         self.assertLessEqual(len(larger_queue), len(small_queue))
 
+    def test_ticket_list_prioritizes_eligible_unevaluated_tickets_stably(self):
+        added = []
+        for ticket_status, category in (
+            ("resolved", "refund"), ("open", "refund"),
+            ("in_progress", "refund"), ("closed", "refund"), ("open", "delivery"),
+        ):
+            added.append(SupportTicket.objects.create(
+                customer=self.customer, order=self.order, category=category,
+                requested_action="refund", message="List ordering test", status=ticket_status,
+            ).pk)
+        resolved, opened, in_progress, closed, delivery = added
+        for params, expected in (
+            ({}, [opened, in_progress, delivery, resolved, closed,
+                  self.pending.pk, self.reviewed.pk, self.auto.pk]),
+            ({"q": "SEARCH-A"}, [opened, in_progress, delivery, resolved, closed,
+                                 self.pending.pk, self.reviewed.pk]),
+            ({"q": "SEARCH-A", "status": "open", "category": "refund"},
+             [opened, self.pending.pk, self.reviewed.pk]),
+        ):
+            with self.subTest(params=params):
+                response = self.client.get(self.list_url, params)
+                self.assertEqual(
+                    [ticket.pk for ticket in response.context["tickets"]], expected
+                )
+                self.assertContains(response, "待評估優先")
+
+
+class OperationsDashboardTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="operations_dashboard_user")
+        customer = Customer.objects.create(name="Operations", email="ops@example.com")
+        low_order = Order.objects.create(
+            customer=customer, shipping_address="Test", status="paid",
+            order_number="OPS-LOW",
+        )
+        high_order = Order.objects.create(
+            customer=customer, shipping_address="Test", status="paid",
+            order_number="OPS-HIGH",
+        )
+        product = Product.objects.create(
+            name="Operations product", product_code="OPS-P1", price=9000, stock=1
+        )
+        OrderItem.objects.create(
+            order=high_order, product=product, quantity=1, unit_price=9000
+        )
+
+        def create_ticket(order, category="damaged", action="refund", gate=True):
+            ticket = SupportTicket.objects.create(
+                customer=customer, order=order, category=category,
+                requested_action=action, message="Operations test", status="open",
+            )
+            if gate:
+                decision, _, _ = run_triage_workflow(ticket, "manual")
+            else:
+                decision, _ = run_triage(ticket, "manual")
+            return ticket, decision
+
+        cls.high, _ = create_ticket(high_order)
+        cls.low, _ = create_ticket(low_order, category="refund")
+        cls.reviewed, reviewed_decision = create_ticket(high_order)
+        submit_human_review(reviewed_decision, "review_requested_action", "Reviewed")
+        cls.closed, _ = create_ticket(high_order)
+        cls.closed.status = "closed"
+        cls.closed.save(update_fields=["status"])
+        cls.no_gate, _ = create_ticket(high_order, gate=False)
+        cls.rerouted, rerouted_decision = create_ticket(high_order)
+        TriageRiskGateRecord.objects.filter(decision=rerouted_decision).update(
+            route="auto_handle"
+        )
+        cls.history, _ = create_ticket(high_order)
+        cls.history.category = "other"
+        cls.history.save(update_fields=["category"])
+        run_triage_workflow(cls.history, "manual")
+        cls.auto = SupportTicket.objects.create(
+            customer=customer, order=low_order, category="other",
+            requested_action="info", message="Operations auto", status="open",
+        )
+        run_triage_execution_workflow(cls.auto, "manual")
+
+    def setUp(self):
+        self.client.force_login(self.user)
+        self.url = reverse("triage_dashboard")
+
+    def test_historical_kpis_and_current_pending_count_have_distinct_scopes(self):
+        response = self.client.get(self.url)
+        metrics = response.context["metrics"]
+        self.assertEqual(metrics["total_decisions"], 9)
+        self.assertEqual(metrics["human_review_count"], 7)
+        self.assertEqual(metrics["human_review_rate"], 77.78)
+        self.assertEqual(metrics["auto_handled_count"], 1)
+        self.assertEqual(metrics["auto_handled_rate"], 11.11)
+        self.assertEqual(response.context["pending_review_count"], 4)
+        self.assertContains(response, "歷史 Decision 總數")
+        self.assertContains(response, "目前待人工審核")
+        self.assertContains(response, "width: 77.78%")
+        self.assertContains(response, "width: 11.11%")
+        self.assertContains(response, "不代表案件已結案")
+
+    def test_high_priority_requires_latest_high_persisted_gate_and_no_review(self):
+        response = self.client.get(self.url)
+        self.assertEqual(
+            [item["ticket_id"] for item in response.context["high_priority_queue"]],
+            [self.high.pk],
+        )
+        self.assertCountEqual(
+            [item["ticket_id"] for item in response.context["high_risk_queue"]],
+            [self.high.pk, self.low.pk, self.no_gate.pk, self.history.pk],
+        )
+        self.assertContains(response, reverse("high_risk_review", args=[self.high.pk]))
+
+    def test_category_counts_use_current_tickets_including_closed_and_reviewed(self):
+        response = self.client.get(self.url)
+        stats = response.context["category_stats"]
+        self.assertEqual(stats["total_tickets"], 8)
+        categories = {row["category"]: row for row in stats["categories"]}
+        self.assertEqual(
+            {key: row["count"] for key, row in categories.items()},
+            {"delivery": 0, "damaged": 5, "missing": 0, "refund": 1, "other": 2},
+        )
+        self.assertEqual(categories["damaged"]["percentage"], 62.5)
+        self.assertEqual(categories["other"]["percentage"], 25.0)
+        self.assertContains(response, "width: 62.5%")
+        self.assertNotContains(response, "商品投訴率")
+
+    def test_search_only_changes_original_pending_list(self):
+        baseline = self.client.get(self.url)
+        for query, expected in ((str(self.low.pk), [self.low.pk]), ("no-match", [])):
+            with self.subTest(query=query):
+                response = self.client.get(self.url, {"q": query})
+                for key in (
+                    "metrics", "pending_review_count", "high_priority_queue",
+                    "category_stats", "recent_execution_history",
+                ):
+                    self.assertEqual(response.context[key], baseline.context[key])
+                self.assertEqual(
+                    [item["ticket_id"] for item in response.context["high_risk_queue"]],
+                    expected,
+                )
+
+    def test_dashboard_queries_remain_bounded_as_decision_history_grows(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as before:
+            self.client.get(self.url)
+        for _ in range(4):
+            run_triage_workflow(self.low, "manual")
+        with CaptureQueriesContext(connection) as after:
+            response = self.client.get(self.url)
+        self.assertEqual(response.context["metrics"]["total_decisions"], 13)
+        self.assertLessEqual(len(after), len(before))
+
+    def test_pending_default_priority_score_and_stable_tie_order(self):
+        from datetime import timedelta
+        from django.utils import timezone
+
+        urgent = SupportTicket.objects.create(
+            customer=self.high.customer, order=self.high.order, category="damaged",
+            requested_action="refund", message="Urgent sorting test", status="open",
+        )
+        SupportTicket.objects.filter(pk=urgent.pk).update(
+            created_at=timezone.now() - timedelta(hours=96)
+        )
+        urgent.refresh_from_db()
+        decision, _, _ = run_triage_workflow(urgent, "manual")
+        self.assertEqual(decision.priority_score, 9)
+        for params, expected in (
+            ({}, [urgent.pk, self.high.pk, self.no_gate.pk, self.history.pk, self.low.pk]),
+            ({"sort": "priority_level", "direction": "asc"},
+             [self.low.pk, self.history.pk, urgent.pk, self.high.pk, self.no_gate.pk]),
+            ({"sort": "priority_score", "direction": "asc"},
+             [self.low.pk, self.history.pk, self.high.pk, self.no_gate.pk, urgent.pk]),
+            ({"sort": "priority_score", "direction": "desc"},
+             [urgent.pk, self.high.pk, self.no_gate.pk, self.history.pk, self.low.pk]),
+        ):
+            with self.subTest(params=params):
+                response = self.client.get(self.url, params)
+                self.assertEqual(
+                    [item["ticket_id"] for item in response.context["high_risk_queue"]],
+                    expected,
+                )
+
+    def test_pending_category_action_and_id_have_fixed_bidirectional_order(self):
+        added = []
+        for action in ("info", "exchange", "compensation", "other"):
+            ticket = SupportTicket.objects.create(
+                customer=self.high.customer, order=self.high.order, category="damaged",
+                requested_action=action, message="Sorting option test", status="open",
+            )
+            run_triage_workflow(ticket, "manual")
+            added.append(ticket.pk)
+        info, exchange, compensation, other = added
+        for field, direction, expected in (
+            ("category", "asc", [self.high.pk, self.no_gate.pk, *added, self.low.pk, self.history.pk]),
+            ("category", "desc", [self.history.pk, self.low.pk, self.high.pk, self.no_gate.pk, *added]),
+            ("requested_action", "asc", [info, exchange, self.high.pk, self.low.pk, self.no_gate.pk, self.history.pk, compensation, other]),
+            ("requested_action", "desc", [other, compensation, self.high.pk, self.low.pk, self.no_gate.pk, self.history.pk, exchange, info]),
+            ("ticket_id", "asc", [self.high.pk, self.low.pk, self.no_gate.pk, self.history.pk, *added]),
+            ("ticket_id", "desc", [other, compensation, exchange, info, self.history.pk, self.no_gate.pk, self.low.pk, self.high.pk]),
+        ):
+            with self.subTest(field=field, direction=direction):
+                response = self.client.get(self.url, {"sort": field, "direction": direction})
+                self.assertEqual(
+                    [item["ticket_id"] for item in response.context["high_risk_queue"]],
+                    expected,
+                )
+
+    def test_pending_search_and_sort_preserve_controls_and_global_sections(self):
+        baseline = self.client.get(self.url)
+        response = self.client.get(self.url, {
+            "q": "OPS-HIGH", "sort": "priority_score", "direction": "asc",
+        })
+        ids = [item["ticket_id"] for item in response.context["high_risk_queue"]]
+        self.assertEqual(ids, [self.history.pk, self.high.pk, self.no_gate.pk])
+        self.assertNotIn(self.reviewed.pk, ids)
+        self.assertContains(response, 'value="OPS-HIGH"')
+        self.assertContains(response, 'name="sort" value="priority_score"')
+        self.assertContains(response, 'name="direction" value="asc"')
+        self.assertContains(response, 'aria-sort="ascending"')
+        self.assertNotContains(response, '<select')
+        for key in (
+            "metrics", "pending_review_count", "high_priority_queue",
+            "category_stats", "recent_execution_history",
+        ):
+            self.assertEqual(response.context[key], baseline.context[key])
+        for field in ("category", "requested_action", "ticket_id"):
+            response = self.client.get(self.url, {"sort": field, "direction": "desc"})
+            for key in ("metrics", "high_priority_queue", "category_stats", "recent_execution_history"):
+                self.assertEqual(response.context[key], baseline.context[key])
+        cleared = self.client.get(self.url)
+        self.assertEqual(cleared.context["selected_sort"], "priority_level")
+        self.assertEqual(cleared.context["selected_direction"], "desc")
+
+    def test_invalid_pending_sort_parameters_revert_to_default(self):
+        for params in (
+            {"sort": "priority_score; DROP TABLE myapp_supportticket", "direction": "asc"},
+            {"sort": "priority_score", "direction": "sideways"},
+            {"sort": "", "direction": ""},
+        ):
+            with self.subTest(params=params):
+                response = self.client.get(self.url, params)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["selected_sort"], "priority_level")
+                self.assertEqual(response.context["selected_direction"], "desc")
+                self.assertEqual(
+                    [item["ticket_id"] for item in response.context["high_risk_queue"]],
+                    [self.high.pk, self.no_gate.pk, self.history.pk, self.low.pk],
+                )
+        self.assertEqual(TicketTriageDecision.objects.count(), 9)
+
+    def test_pending_header_links_toggle_direction_and_preserve_search(self):
+        import re
+        from html import unescape
+        from urllib.parse import parse_qs, urljoin, urlsplit
+
+        def header_links(response):
+            urls = re.findall(
+                r'<a class="table-sort-link" href="([^"]+)"',
+                response.content.decode("utf-8"),
+            )
+            return {
+                parse_qs(urlsplit(unescape(url)).query)["sort"][0]: unescape(url)
+                for url in urls
+            }
+
+        baseline = self.client.get(self.url, {"q": "OPS-HIGH"})
+        links = header_links(baseline)
+        self.assertEqual(set(links), {
+            "ticket_id", "category", "requested_action", "priority_level", "priority_score",
+        })
+        for field, first_direction in (
+            ("ticket_id", "asc"), ("category", "asc"), ("requested_action", "asc"),
+            ("priority_level", "asc"), ("priority_score", "desc"),
+        ):
+            with self.subTest(field=field):
+                url = links[field]
+                for direction in (first_direction, "desc" if first_direction == "asc" else "asc"):
+                    self.assertEqual(parse_qs(urlsplit(url).query)["q"], ["OPS-HIGH"])
+                    response = self.client.get(urljoin(self.url, url))
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.context["selected_sort"], field)
+                    self.assertEqual(response.context["selected_direction"], direction)
+                    self.assertContains(response, "↑" if direction == "asc" else "↓")
+                    self.assertContains(
+                        response, 'aria-sort="ascending"' if direction == "asc"
+                        else 'aria-sort="descending"',
+                    )
+                    for key in (
+                        "metrics", "pending_review_count", "high_priority_queue",
+                        "category_stats", "recent_execution_history",
+                    ):
+                        self.assertEqual(response.context[key], baseline.context[key])
+                    url = header_links(response)[field]
+
+
+class EmptyOperationsDashboardTests(TestCase):
+
+    def test_empty_dashboard_has_zero_counts_and_safe_chart_widths(self):
+        user = User.objects.create_user(username="empty_operations_user")
+        self.client.force_login(user)
+        response = self.client.get(reverse("triage_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["metrics"]["total_decisions"], 0)
+        self.assertEqual(response.context["metrics"]["human_review_rate"], 0.0)
+        self.assertEqual(response.context["metrics"]["auto_handled_rate"], 0.0)
+        self.assertEqual(response.context["pending_review_count"], 0)
+        self.assertEqual(response.context["high_priority_queue"], [])
+        self.assertEqual(response.context["category_stats"]["total_tickets"], 0)
+        self.assertTrue(all(
+            row["count"] == 0 and row["percentage"] == 0
+            for row in response.context["category_stats"]["categories"]
+        ))
+        self.assertContains(response, "目前沒有高優先待審案件。")
+        self.assertContains(response, "目前沒有客服案件。")
+
 
 class PrepareLiveDemoCommandTests(TestCase):
 

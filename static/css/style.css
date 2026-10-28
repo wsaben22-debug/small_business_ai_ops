@@ -55,6 +55,93 @@ body {
 
 /* Ops Data Table */
 
+.operations-kpis {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pending-kpi {
+    border-color: #cbd5e1;
+}
+
+.operations-panel {
+    margin-bottom: 24px;
+    padding: 24px;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #ffffff;
+}
+
+.operations-panel h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+}
+
+.operations-panel .ops-table {
+    margin-top: 18px;
+}
+
+.section-count {
+    margin-left: 8px;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.operations-insights {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+}
+
+.ratio-row {
+    margin-top: 20px;
+}
+
+.ratio-label {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 6px 12px;
+    margin-bottom: 8px;
+    color: #475569;
+    font-size: 13px;
+}
+
+.ratio-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #f1f5f9;
+}
+
+.ratio-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #64748b;
+}
+
+.ratio-human {
+    background: #b45309;
+}
+
+.ratio-auto {
+    background: #047857;
+}
+
+@media (max-width: 960px) {
+    .operations-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .operations-kpis,
+    .operations-insights {
+        grid-template-columns: 1fr;
+    }
+}
+
 .ops-table {
     width: 100%;
     border-collapse: collapse;
@@ -387,6 +474,30 @@ body {
     margin: 10px 0 0;
     color: #64748b;
     font-size: 13px;
+}
+
+.table-sort-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: inherit;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.table-sort-link:hover {
+    color: #111827;
+    text-decoration: underline;
+}
+
+.ops-table th[aria-sort="ascending"],
+.ops-table th[aria-sort="descending"] {
+    color: #111827;
+}
+
+.table-sort-link:focus-visible {
+    outline: 2px solid #64748b;
+    outline-offset: 2px;
 }
 
 .filter-panel {

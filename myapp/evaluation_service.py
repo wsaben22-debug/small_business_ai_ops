@@ -1,5 +1,8 @@
+from django.db.models import Count
+
 from .triage_service import get_risk_gate_result
 from .models import(
+    SupportTicket,
     TicketTriageDecision,
     TriageExecutionRecord,
 )
@@ -9,7 +12,7 @@ def calculate_triage_metrics():
 
     human_review_count = 0
 
-    for decision in TicketTriageDecision.objects.all():
+    for decision in TicketTriageDecision.objects.select_related("risk_gate_record"):
         route, _ = get_risk_gate_result(decision)
 
         if route == "human_review":
@@ -45,3 +48,22 @@ def calculate_triage_metrics():
         "auto_handled_count": auto_handled_count,
         "auto_handled_rate": auto_handled_rate,
     }
+
+
+def calculate_ticket_category_stats():
+    counts = dict(
+        SupportTicket.objects.order_by().values("category")
+        .annotate(count=Count("pk")).values_list("category", "count")
+    )
+    total = sum(counts.values())
+    labels = dict(SupportTicket.CATEGORY_CHOICES)
+    categories = []
+    for category in dict.fromkeys([*labels, *counts]):
+        count = counts.get(category, 0)
+        categories.append({
+            "category": category,
+            "label": labels.get(category, category),
+            "count": count,
+            "percentage": round(count / total * 100, 2) if total else 0.0,
+        })
+    return {"total_tickets": total, "categories": categories}
