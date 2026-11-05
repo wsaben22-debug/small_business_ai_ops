@@ -46,7 +46,7 @@
         </header>
 
         {% if messages %}
-            <section class="review-section">
+            <section class="review-messages">
                 {% for message in messages %}
                     <p class="{% if message.tags == 'error' %}review-error{% else %}review-note{% endif %}">
                         {{ message }}
@@ -58,14 +58,14 @@
         {% if error %}
 
             <section class="review-section">
-                <p>{{ error }}</p>
+                <p class="review-error">{{ error }}</p>
             </section>
 
         {% elif package %}
 
             <!-- Ticket Overview -->
-            <section class="review-section">
-                <h2>案件摘要</h2>
+            <section class="review-section review-section--rules">
+                <h2>案件摘要 <span class="section-tag">規則評估</span></h2>
 
                 <div class="info-grid">
                     <div class="info-item">
@@ -143,13 +143,13 @@
             </section>
 
             <!-- Priority -->
-            <section class="review-section">
-                <h2>優先等級</h2>
+            <section class="review-section review-section--rules">
+                <h2>優先等級 <span class="section-tag">規則評估</span></h2>
 
                 <div class="info-grid">
                     <div class="info-item">
                         <span class="info-label">等級</span>
-                        <strong>
+                        <strong class="status-badge priority-{{ package.priority.level }}">
                             {% if package.priority.level == "low" %}
                                 低優先
                             {% elif package.priority.level == "medium" %}
@@ -170,14 +170,15 @@
             </section>
 
             <!-- Assessment -->
-            <section class="review-section">
-                <h2>案件評估</h2>
+            <section class="review-section review-section--rules">
+                <h2>案件評估 <span class="section-tag">規則評估</span></h2>
 
                 <div class="assessment-grid">
 
                     <div class="assessment-card">
                         <h3>嚴重程度</h3>
                         <p>
+                            <span class="status-badge priority-{{ package.severity.level }}">
                             {% if package.severity.level == "low" %}
                                 低
                             {% elif package.severity.level == "medium" %}
@@ -187,6 +188,7 @@
                             {% else %}
                                 {{ package.severity.level }}
                             {% endif %}
+                            </span>
                             /
                             {{ package.severity.score }}
                         </p>
@@ -210,6 +212,7 @@
                     <div class="assessment-card">
                         <h3>影響程度</h3>
                         <p>
+                            <span class="status-badge priority-{{ package.impact.level }}">
                             {% if package.impact.level == "low" %}
                                 低
                             {% elif package.impact.level == "medium" %}
@@ -219,6 +222,7 @@
                             {% else %}
                                 {{ package.impact.level }}
                             {% endif %}
+                            </span>
                             /
                             {{ package.impact.score }}
                         </p>
@@ -240,6 +244,7 @@
                     <div class="assessment-card">
                         <h3>緊急程度</h3>
                         <p>
+                            <span class="status-badge priority-{{ package.urgency.level }}">
                             {% if package.urgency.level == "low" %}
                                 低
                             {% elif package.urgency.level == "medium" %}
@@ -249,6 +254,7 @@
                             {% else %}
                                 {{ package.urgency.level }}
                             {% endif %}
+                            </span>
                             /
                             {{ package.urgency.score }}
                         </p>
@@ -329,8 +335,8 @@
             </section>
 
             <!-- Decision Support -->
-            <section class="review-section">
-                <h2>決策建議</h2>
+            <section class="review-section review-section--rules">
+                <h2>決策建議 <span class="section-tag">規則評估</span></h2>
 
                 <div class="detail-card">
                     <p>
@@ -385,8 +391,8 @@
 
             <!-- AI Assist -->
             {% if package.route == "human_review" %}
-                <section class="review-section">
-                    <h2>AI 輔助分析</h2>
+                <section class="review-section review-section--ai">
+                    <h2>AI 輔助分析 <span class="section-tag">Gemini AI</span></h2>
 
                     <p class="review-note">
                         AI 將根據案件與風險評估資料，
@@ -421,7 +427,7 @@
                     {% endif %}
 
                     {% if latest_ai_record %}
-                        <div class="detail-card">
+                        <div class="detail-card ai-result-card">
                             <h3>最近一次 AI 分析</h3>
 
                             {% if latest_ai_record.status == "success" %}
@@ -440,7 +446,7 @@
                                 </ul>
 
                                 <h3>客服回覆草稿</h3>
-                                <p>
+                                <p class="ai-reply-draft">
                                     {{ latest_ai_record.output_data.reply_draft|linebreaksbr }}
                                 </p>
 
@@ -465,8 +471,8 @@
             {% endif %}
 
             <!-- Human Review Form -->
-            <section class="review-section">
-                <h2>提交人工審核</h2>
+            <section class="review-section review-section--human">
+                <h2>提交人工審核 <span class="section-tag">人工決策</span></h2>
 
                 {% if review_error %}
                     <p class="review-error">
@@ -557,6 +563,7 @@
                 </div>
 
                 {% if package.ticket_history.recent_tickets %}
+                    <div class="table-scroll">
                     <table class="ops-table">
                         <thead>
                             <tr>
@@ -623,9 +630,10 @@
                             {% endfor %}
                         </tbody>
                     </table>
+                    </div>
 
                 {% else %}
-                    <p>目前沒有過往案件紀錄。</p>
+                    <p class="empty-table-message">目前沒有過往案件紀錄。</p>
                 {% endif %}
             </section>
 

@@ -104,6 +104,7 @@
             </h2>
 
             {% if high_priority_queue %}
+                <div class="table-scroll">
                 <table class="ops-table">
                     <thead>
                         <tr>
@@ -128,6 +129,7 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
             {% else %}
                 <p class="empty-table-message">目前沒有高優先待審案件。</p>
             {% endif %}
@@ -191,10 +193,8 @@
 
         </div>
 
-        <hr>
-
         <!-- Human Review Queue -->
-        <section class="table-section">
+        <section class="operations-panel table-section">
             <h2>待人工審核案件</h2>
 
             <form method="get" class="search-form" action="{% url 'triage_dashboard' %}">
@@ -211,6 +211,7 @@
             </form>
 
             {% if high_risk_queue %}
+                <div class="table-scroll">
                 <table class="ops-table">
                     <thead>
                         <tr>
@@ -316,6 +317,7 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
 
             {% else %}
                 <p class="empty-table-message">
@@ -329,13 +331,12 @@
 
         </section>
 
-        <hr>
-
         <!-- Recent Execution History -->
-        <section class="table-section">
+        <section class="operations-panel table-section">
             <h2>最近執行紀錄</h2>
 
             {% if recent_execution_history %}
+                <div class="table-scroll">
                 <table class="ops-table">
                     <thead>
                         <tr>
@@ -426,9 +427,10 @@
                         {% endfor %}
                     </tbody>
                 </table>
+                </div>
 
             {% else %}
-                <p>目前尚無執行紀錄。</p>
+                <p class="empty-table-message">目前尚無執行紀錄。</p>
             {% endif %}
         </section>
 
