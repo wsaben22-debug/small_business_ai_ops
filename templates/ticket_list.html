@@ -66,7 +66,7 @@
         {% if messages %}
             <div class="message-list">
                 {% for message in messages %}
-                    <p class="system-message">
+                    <p class="system-message{% if message.tags %} system-message--{{ message.tags }}{% endif %}">
                         {{ message }}
                     </p>
                 {% endfor %}
