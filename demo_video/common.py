@@ -12,37 +12,39 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 # ---------------------------------------------------------------
 # 停留秒數（依分鏡；要調整節奏改這裡就好）
 # ---------------------------------------------------------------
-# 段 1 開場
+# 旁白秒數見 output/voice/durations.txt；每段影片要比旁白長 1.5～2 秒以上。
+# 段 1 開場（旁白 15.5 秒）
 HOLD_LOGIN_PAGE = 1.5
-HOLD_LIST = 5
+HOLD_LIST = 8
 
-# 段 2 T001
+# 段 2 T001（旁白 29.7 秒）
 HOLD_T001_SEARCH = 4
-HOLD_T001_EVALUATED = 3
-HOLD_T001_EXECUTION = 6
+HOLD_T001_EVALUATED = 5
+HOLD_T001_EXECUTION = 8
 
-# 段 3 T002
+# 段 3 T002（旁白 28.0 秒）
 HOLD_T002_SEARCH = 3
 HOLD_T002_SCORES = 6
 HOLD_T002_REASON = 5
 HOLD_T002_RECOMMEND = 5     # 段 3 停在「決策建議」後結束
 
-# 段 4 T003
+# 段 4a T003，AI 按鈕前（旁白 25.5 秒）
 HOLD_T003_QUEUE = 4
-HOLD_T003_SCORES = 6
-HOLD_T003_REASON = 5
+HOLD_T003_SCORES = 7
+HOLD_T003_REASON = 6
+# 段 4b AI 結果（旁白 12.8 秒）
 HOLD_AI_SUMMARY = 7
 HOLD_AI_RISK_NOTES = 7
 HOLD_AI_REPLY_DRAFT = 7
 
-# 段 5 AI 失敗
+# 段 5 AI 失敗（旁白 20.3 秒；估計影片約 28 秒，已足夠）
 HOLD_T002_REVIEW_OPEN = 3
 HOLD_AI_FAILED = 6
 HOLD_AFTER_SUBMIT = 3
 
-# 段 6 收尾
-HOLD_FINAL_KPIS = 6
-HOLD_FINAL_QUEUE = 6
+# 段 6 收尾（旁白 19.1 秒）
+HOLD_FINAL_KPIS = 7
+HOLD_FINAL_QUEUE = 7
 HOLD_FINAL_HISTORY = 4
 
 # 每支影片結尾多留一點，方便剪輯
