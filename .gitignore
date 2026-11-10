@@ -18,3 +18,7 @@ db.sqlite3
 
 # Database backups
 backups/
+
+demo_video/output/
+demo_video/timeline_*.txt
+db_demo_recording*.sqlite3
