@@ -22,3 +22,5 @@ backups/
 demo_video/output/
 demo_video/timeline_*.txt
 db_demo_recording*.sqlite3
+# RAG 知識庫索引（由 build_knowledge_index 產生）
+knowledge_base/index.json
